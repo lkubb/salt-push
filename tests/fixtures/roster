@@ -1,0 +1,2 @@
+# Intentionally empty: smoke tests only verify that salt-ssh starts up
+# and reads this roster from the generated master config.
