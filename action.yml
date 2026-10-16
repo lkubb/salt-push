@@ -1,0 +1,202 @@
+---
+name: salt-push
+description: >-
+  Run Salt in push mode (salt-call/salt-ssh against managed remote resources)
+  from a checked-out repository, applying a highstate by default.
+author: lkubb
+branding:
+  icon: upload-cloud
+  color: blue
+
+inputs:
+  image:
+    description: Container image to run (full reference).
+    default: ghcr.io/lkubb/salt-push:latest
+  commands:
+    description: >-
+      Commands to run in the container, one per line, sequential and
+      fail-fast. Blank lines and lines starting with '#' are skipped.
+      Lines are split with shell quoting rules but never evaluated — no
+      variable expansion, command substitution or globbing.
+    default: salt-call
+  pull:
+    description: >-
+      Image pull policy — always (default; protects shared self-hosted
+      daemons against tag-squatting by earlier jobs), missing (pull only
+      when absent) or never (a local image must exist, e.g. one built in a
+      previous step).
+    default: always
+  states:
+    description: >-
+      State tree, mounted read-only to /app/srv/salt. Relative paths resolve
+      against the workspace. The default is skipped if absent; an explicitly
+      set path must exist. Empty disables the mount.
+    default: srv/salt
+  pillar:
+    description: >-
+      Pillar tree, mounted read-only to /app/srv/pillar. Relative paths
+      resolve against the workspace. The default is skipped if absent; an
+      explicitly set path must exist. Empty disables the mount.
+    default: srv/pillar
+  roster:
+    description: salt-ssh roster file, mounted read-only to /app/roster.
+    default: ''
+  ssh-dir:
+    description: >-
+      Directory mounted writable to /app/ssh (salt-ssh client key +
+      known_hosts; contains a private key). Created if missing.
+    default: ''
+  minion-config:
+    description: >-
+      Directory with minion config drop-ins (*.conf), mounted read-only to
+      /app/config/minion.d.
+    default: ''
+  ssh-config:
+    description: >-
+      Directory with salt-ssh master config drop-ins (*.conf), mounted
+      read-only to /app/config/ssh.d.
+    default: ''
+  cache-dir:
+    description: >-
+      Host directory mounted writable to /app/cache. Always mounted, created
+      if missing. Defaults to salt-push-cache under the runner temp dir —
+      outside the checked-out repo, so cache contents (which may include
+      pillar-derived data) stay clear of the workspace.
+    default: ''
+  cache-key:
+    description: >-
+      Cache key. Cache entries are immutable, so the default includes the
+      run id to save a fresh entry per run.
+    default: ''
+  cache-paths:
+    description: >-
+      Enables caching when set: a whitelist of paths persisted via
+      actions/cache (restored before, saved after the commands — even
+      failing ones). One per line, relative to cache-dir, globs allowed;
+      blank lines and '#' comments are skipped. '.' persists the whole
+      cache-dir. On public repos, treat every listed path as published —
+      fork PR workflows can restore caches saved on the default branch.
+    default: ''
+  cache-restore-keys:
+    description: >-
+      Prefix fallback(s) used to restore the cache. Set to the empty string
+      to only restore exact cache-key matches (never stale entries).
+    default: salt-push-
+  env-pass:
+    description: >-
+      Whitespace/comma-separated names of environment variables to forward
+      into the container (set them on this step's env:). Only the names
+      appear on the docker command line, never the values.
+    default: ''
+  salt-resources:
+    description: >-
+      Inline resource declarations (YAML placed under the resources: pillar
+      key); sets SALT_RESOURCES.
+    default: ''
+  salt-roster:
+    description: Inline salt-ssh roster contents; sets SALT_ROSTER.
+    default: ''
+  log-level:
+    description: Console log level; sets SALT_LOG_LEVEL (container default warning).
+    default: ''
+  log-file-level:
+    description: >-
+      Log level for Salt's file logs (captured via logs-dir); sets
+      SALT_LOGFILE_LEVEL (container default info).
+    default: ''
+  logs-dir:
+    description: >-
+      Directory mounted writable to /app/logs to capture Salt's file logs
+      (created if missing), e.g. for uploading as an artifact on failure.
+      Debug-level file logs can contain rendered states and pillar values —
+      treat uploaded artifacts accordingly.
+    default: ''
+  force-color:
+    description: Force colored Salt output (Actions logs render ANSI).
+    default: 'true'
+  user:
+    description: >-
+      User the tool runs as inside the container; sets SALT_PUSH_USER
+      (e.g. root to skip dropping privileges).
+    default: ''
+  python-packages:
+    description: >-
+      Extra pip packages installed via salt-pip at container start; sets
+      PYTHON_PACKAGES. Slow — prefer baking them into a derived image.
+    default: ''
+  summary:
+    description: >-
+      Set to 'true' to append a per-command status table with collapsible,
+      tail-truncated ANSI-stripped output (~100 KB total) to the job
+      summary.
+    default: 'false'
+
+outputs:
+  exit-code:
+    description: Exit code of the failing command, or 0 if all succeeded.
+    value: ${{ steps.run.outputs.exit-code }}
+  failed-command:
+    description: The command line that failed (empty if all succeeded).
+    value: ${{ steps.run.outputs.failed-command }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve cache dir, key and paths
+      id: setup
+      shell: bash
+      env:
+        SP_CACHE_DIR: ${{ inputs.cache-dir }}
+        SP_CACHE_KEY: ${{ inputs.cache-key }}
+        SP_CACHE_PATHS: ${{ inputs.cache-paths }}
+        SP_REF_NAME: ${{ github.ref_name }}
+        SP_RUN_ID: ${{ github.run_id }}
+      run: |
+        command -v python3 >/dev/null || { echo "::error::salt-push requires python3 on the runner"; exit 2; }
+        python3 "${GITHUB_ACTION_PATH}/action/setup.py"
+
+    - name: Restore cache
+      if: inputs.cache-paths != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ steps.setup.outputs.cache-paths }}
+        key: ${{ steps.setup.outputs.key }}
+        restore-keys: ${{ inputs.cache-restore-keys }}
+
+    - name: Run salt-push
+      id: run
+      shell: bash
+      env:
+        SP_IMAGE: ${{ inputs.image }}
+        SP_PULL: ${{ inputs.pull }}
+        SP_COMMANDS: ${{ inputs.commands }}
+        SP_STATES: ${{ inputs.states }}
+        SP_PILLAR: ${{ inputs.pillar }}
+        SP_ROSTER: ${{ inputs.roster }}
+        SP_SSH_DIR: ${{ inputs.ssh-dir }}
+        SP_LOGS_DIR: ${{ inputs.logs-dir }}
+        SP_MINION_CONFIG: ${{ inputs.minion-config }}
+        SP_SSH_CONFIG: ${{ inputs.ssh-config }}
+        SP_CACHE_DIR: ${{ steps.setup.outputs.cache-dir }}
+        SP_ENV_PASS: ${{ inputs.env-pass }}
+        SP_FORCE_COLOR: ${{ inputs.force-color }}
+        SP_SUMMARY: ${{ inputs.summary }}
+        SALT_RESOURCES: ${{ inputs.salt-resources }}
+        SALT_ROSTER: ${{ inputs.salt-roster }}
+        SALT_LOG_LEVEL: ${{ inputs.log-level }}
+        SALT_LOGFILE_LEVEL: ${{ inputs.log-file-level }}
+        SALT_PUSH_USER: ${{ inputs.user }}
+        PYTHON_PACKAGES: ${{ inputs.python-packages }}
+      run: |
+        command -v python3 >/dev/null || { echo "::error::salt-push requires python3 on the runner"; exit 2; }
+        exec python3 "${GITHUB_ACTION_PATH}/action/run.py"
+
+    - name: Save cache
+      if: always() && inputs.cache-paths != ''
+      # A run may legitimately not produce every whitelisted path — don't
+      # fail the action over an unsaveable cache.
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ steps.setup.outputs.cache-paths }}
+        key: ${{ steps.setup.outputs.key }}

@@ -56,7 +56,7 @@ esac
 # purposes, so remember whether the user actually provided them.
 user_minion_id="${SALT_MINION_ID:-}"
 user_log_level="${SALT_LOG_LEVEL:-}"
-user_level_logfile="${SALT_LEVEL_LOGFILE:-}"
+user_level_logfile="${SALT_LOGFILE_LEVEL:-}"
 user_resources="${SALT_RESOURCES:-}"
 user_roster="${SALT_ROSTER:-}"
 
@@ -70,7 +70,7 @@ DEBUG="${DEBUG:-}"
 
 SALT_MINION_ID="${user_minion_id:-salt-push}"
 SALT_LOG_LEVEL="${user_log_level:-warning}"
-SALT_LEVEL_LOGFILE="${user_level_logfile:-info}"
+SALT_LOGFILE_LEVEL="${user_level_logfile:-info}"
 SALT_PUSH_DIR="${SALT_PUSH_DIR:-/app}"
 SALT_PUSH_USER="${SALT_PUSH_USER:-${SALT_USER}}"
 
@@ -127,7 +127,10 @@ cachedir: ${SALT_PUSH_DIR}/cache/minion
 # which breaks under PUID remapping and wouldn't persist in the cache mount.
 extension_modules: ${SALT_PUSH_DIR}/cache/minion/extmods
 log_file: ${SALT_PUSH_DIR}/logs/minion
-log_level_logfile: ${SALT_LEVEL_LOGFILE}
+log_level_logfile: ${SALT_LOGFILE_LEVEL}
+# Reverse DNS of ephemeral container IPs yields nothing and stalls startup
+# where resolvers are slow.
+enable_fqdns_grains: False
 # Custom modules shipped with this image (e.g. resource.list)
 module_dirs:
   - /opt/salt-push
@@ -143,12 +146,15 @@ pillar_roots:
   base:
     - ${SALT_PUSH_DIR}/srv/pillar
 cachedir: ${SALT_PUSH_DIR}/cache/master
+# NOTE: salt-ssh persists job returns under cachedir/jobs regardless of
+# config — it calls the master_job_cache returner unconditionally and
+# ignores job_cache/minion_data_cache. Don't persist cache/master blindly.
 roster_file: ${roster_file}
 ssh_priv: ${SALT_PUSH_DIR}/ssh/salt-ssh.rsa
 known_hosts_file: ${SALT_PUSH_DIR}/ssh/known_hosts
 log_file: ${SALT_PUSH_DIR}/logs/ssh
 ssh_log_file: ${SALT_PUSH_DIR}/logs/ssh
-log_level_logfile: ${SALT_LEVEL_LOGFILE}
+log_level_logfile: ${SALT_LOGFILE_LEVEL}
 default_include: ${SALT_PUSH_DIR}/config/ssh.d/*.conf
 EOF
 

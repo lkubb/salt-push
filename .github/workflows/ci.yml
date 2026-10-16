@@ -39,6 +39,9 @@ jobs:
       - name: Run shellcheck
         run: shellcheck assets/*.sh tests/*.sh
 
+      - name: Run action unit tests
+        run: python3 -m unittest discover -s tests -v
+
       - name: Run hadolint
         run: docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile
 
@@ -124,11 +127,112 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  action-test:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      # Docker daemons aren't shared across jobs, so build locally from the
+      # shared gha cache scope (hot after the build job's first run).
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: salt-push:ci
+          cache-from: type=gha,scope=build-amd64
+
+      - name: Default highstate
+        uses: ./
+        with:
+          image: salt-push:ci
+          pull: never
+          states: tests/fixtures/srv/salt
+          pillar: tests/fixtures/srv/pillar
+          logs-dir: ${{ runner.temp }}/salt-logs
+          log-file-level: debug
+
+      - name: Assert file logs captured
+        run: test -s "${RUNNER_TEMP}/salt-logs/minion"
+
+      # No trees at all: the absent default mounts are skipped silently
+      - name: Multiple commands + inline resources
+        uses: ./
+        with:
+          image: salt-push:ci
+          pull: never
+          salt-resources: 'dummy: {resource_ids: [env-01]}'
+          summary: 'true'
+          commands: |
+            # comment and blank lines are skipped
+
+            salt-call test.ping
+            salt -T dummy test.ping
+
+      - name: Failing command
+        id: failing
+        continue-on-error: true
+        uses: ./
+        with:
+          image: salt-push:ci
+          pull: never
+          states: tests/fixtures/srv/salt
+          pillar: tests/fixtures/srv/pillar
+          commands: |
+            salt-call state.apply fail
+            salt-call test.ping
+
+      - name: Assert failure is reported
+        env:
+          OUTCOME: ${{ steps.failing.outcome }}
+          EXIT_CODE: ${{ steps.failing.outputs.exit-code }}
+          FAILED_COMMAND: ${{ steps.failing.outputs.failed-command }}
+        run: |
+          [[ "${OUTCOME}" == failure ]]
+          [[ "${EXIT_CODE}" == 2 ]]
+          [[ "${FAILED_COMMAND}" == "salt-call state.apply fail" ]]
+
+      # cache/save runs at action end (not as a job post-step), so the
+      # round-trip is testable within a single job.
+      - name: Cache round-trip (save, whitelisted)
+        uses: ./
+        with:
+          image: salt-push:ci
+          pull: never
+          cache-key: action-test-${{ github.run_id }}
+          cache-paths: keep
+          commands: |
+            salt-call cmd.run 'mkdir -p /app/cache/keep && touch /app/cache/keep/marker /app/cache/drop-marker'
+
+      - name: Drop local cache dir
+        run: rm -rf "${RUNNER_TEMP}/salt-push-cache"
+
+      - name: Cache round-trip (restore)
+        uses: ./
+        with:
+          image: salt-push:ci
+          pull: never
+          cache-key: action-test-${{ github.run_id }}
+          cache-paths: keep
+          commands: salt-call test.ping
+
+      - name: Assert whitelisted path restored, rest dropped
+        run: |
+          test -f "${RUNNER_TEMP}/salt-push-cache/keep/marker"
+          test ! -e "${RUNNER_TEMP}/salt-push-cache/drop-marker"
+
   publish:
     if: github.event_name != 'pull_request'
     needs:
       - build
       - lint
+      - action-test
     runs-on: ubuntu-24.04
     permissions:
       contents: read

@@ -171,7 +171,17 @@ else
 fi
 rm -rf "${ssh_dir}"
 
-# 15. Build-arg-baked package is importable by the onedir interpreter
+# 15. Hardened config defaults: no fqdns grain stalls — and drop-ins still
+# override them
+check "config: fqdns grains disabled" 'False' \
+  docker run --rm "${IMG}" salt-call config.get enable_fqdns_grains
+
+check "config: drop-in overrides hardened default" 'True' \
+  docker run --rm \
+  -v "${FIXTURES}/minion_config:/app/config/minion.d:ro" \
+  "${IMG}" salt-call config.get enable_fqdns_grains
+
+# 16. Build-arg-baked package is importable by the onedir interpreter
 if [[ -n "${BAKED}" ]]; then
   if docker run --rm "${BAKED}" /opt/saltstack/salt/bin/python3 -c "import saltext.github" 2>&1; then
     pass "baked: import saltext.github"
