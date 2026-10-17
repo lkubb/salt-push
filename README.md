@@ -8,10 +8,13 @@ it pushes changes out to the targets, then exits. Nothing is
 long-running on either end. Targets can be:
 
 - **remote hosts** over SSH (`salt-ssh`)
-- **API-backed resources** — a GitHub org via
-  [saltext-github](https://github.com/salt-extensions/saltext-github),
-  cloud providers, DNS, … (`salt`, powered by `salt-call -r`)
-- **the local minion** itself (`salt-call`)
+- **managed resources** — anything exposed as a Salt resource type,
+  e.g. a GitHub org via
+  [saltext-github](https://github.com/salt-extensions/saltext-github)
+  (`salt`, powered by `salt-call -r`)
+- **services covered only by traditional execution/state modules** —
+  databases, Vault secrets and mounts, cloud providers, DNS, …
+  (`salt-call`)
 
 ## One repo, two deliverables
 
@@ -23,10 +26,10 @@ wraps it:
    that adds a one-shot mode: run a single `salt-call`, `salt` or
    `salt-ssh` command against a mounted state tree, exit with its
    return code. → [`docs/container.md`](docs/container.md)
-1. **The GitHub Action** — `uses: lkubb/salt-push@v1` mounts paths
-   from the checked-out repository into the container and runs one or
-   more commands sequentially (fail-fast), applying a highstate by
-   default. → [`docs/action.md`](docs/action.md)
+1. **The GitHub Action** — mounts paths from the checked-out
+   repository into the container and runs one or more commands
+   sequentially (fail-fast), applying a highstate by default. →
+   [`docs/action.md`](docs/action.md)
 
 Use the container directly anywhere Docker runs; use the action when
 the state tree lives in a GitHub repository and CI should apply it.

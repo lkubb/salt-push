@@ -45,8 +45,8 @@ inputs:
   # 1B Literal inputs for minion pillar
   minion-pillar:
     description: >-
-      Inline pillar data (YAML mapping) for the local minion, merged over
-      the mounted pillar tree; sets SALT_PILLAR.
+      Inline pillar data (YAML mapping) for the managing minion, merged
+      over the mounted pillar tree; sets SALT_PILLAR.
     default: ''
   resources:
     description: >-
