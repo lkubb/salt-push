@@ -14,4 +14,5 @@ target-version = "py311"
 [lint]
 extend-select = [
     "A0",
+    "UP",
 ]
