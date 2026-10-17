@@ -162,6 +162,21 @@ inputs:
       tail-truncated ANSI-stripped output (~100 KB total) to the job
       summary.
     default: 'false'
+  results:
+    description: >-
+      Set to 'true' to capture each command's Salt return (read from the
+      job cache after the run, then removed from it) and expose them via
+      the results output.
+    default: 'false'
+  results-filter:
+    description: >-
+      jq expression applied to each command's result before it is embedded
+      in the results output — trim large returns to the fields you need,
+      e.g. '.return | map_values(.changes)'. Setting it implies results:
+      'true'. Requires jq on the runner (GitHub-hosted runners ship it).
+      Syntax errors fail the run up front; a filter that errors at runtime
+      yields null for that command, with a warning.
+    default: ''
 
 outputs:
   exit-code:
@@ -170,6 +185,13 @@ outputs:
   failed-command:
     description: The command line that failed (empty if all succeeded).
     value: ${{ steps.run.outputs.failed-command }}
+  results:
+    description: >-
+      When the results input is 'true': a JSON array of per-command job
+      returns ('[{"command": …, "result": …}, …]', executed commands
+      only), parseable with fromJSON. Subject to GitHub's 1 MB step
+      output limit.
+    value: ${{ steps.run.outputs.results }}
 
 runs:
   using: composite
@@ -213,6 +235,8 @@ runs:
         SP_ENV_PASS: ${{ inputs.env-pass }}
         SP_FORCE_COLOR: ${{ inputs.force-color }}
         SP_SUMMARY: ${{ inputs.summary }}
+        SP_RESULTS: ${{ inputs.results }}
+        SP_RESULTS_FILTER: ${{ inputs.results-filter }}
         SALT_PILLAR: ${{ inputs.minion-pillar }}
         SALT_RESOURCES: ${{ inputs.resources }}
         SALT_ROSTER: ${{ inputs.roster }}

@@ -77,6 +77,15 @@ check "salt-call: SALT_PUSH_USER=root" '^ +root$' \
 check "salt-call: SALT_FORCE_COLOR=true" $'\x1b\[' \
 	docker run --rm -e SALT_FORCE_COLOR=true "${IMG}" salt-call test.ping
 
+# 6b. stdout carries only Salt's output — upstream chatter (e.g. the UID
+# mapping notice) goes to stderr, so piping into a JSON parser works
+out="$(docker run --rm -e PUID=12345 -e PGID=12345 "${IMG}" salt-call --out json test.ping 2>/dev/null)"
+if python3 -c 'import json,sys; json.load(sys.stdin)' <<<"${out}" >/dev/null 2>&1; then
+	pass "salt-call: clean JSON on stdout with --out json"
+else
+	fail "salt-call: clean JSON on stdout with --out json"$'\n'"${out}"
+fi
+
 # 7. state.apply with mounted state/pillar trees renders pillar data
 check "salt-call: state.apply ok renders pillar" 'hello-from-pillar' \
 	docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" "${IMG}" salt-call state.apply ok
@@ -162,6 +171,10 @@ else
 	fail "salt-call: SALT_PILLAR overrides mounted pillar, SALT_RESOURCES wins resources key"$'\n'"${out}"
 fi
 
+# 12j. Merged state runs render with the highstate outputter (patched Salt)
+check "salt: state.apply renders highstate output" 'Succeeded:' \
+	docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" "${IMG}" salt '*' state.apply ok
+
 # 13. Failing state under -r dispatch still exits non-zero
 rc=0
 docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" "${IMG}" salt '*' state.apply fail >/dev/null 2>&1 || rc=$?
@@ -231,7 +244,54 @@ check "config: SALT_MINION_CONFIG wins over drop-in" 'inline-wins' \
 	-e SALT_MINION_CONFIG=$'grains:\n  smoke_dropin: inline-wins' \
 	"${IMG}" salt-call grains.get smoke_dropin
 
-# 16. Build-arg-baked package is importable by the onedir interpreter
+# 16. SALT_RESULT_FILE: JSON job return written, no msgpack job cache
+res_dir="${HERE}/.smoke-results"
+rm -rf "${res_dir}" && mkdir -p "${res_dir}"
+docker run --rm -v "${res_dir}:/app/cache" -e SALT_RESULT_FILE=/app/cache/result.json \
+	"${IMG}" salt-call test.ping >/dev/null 2>&1 || true
+if grep -q '"return": true' "${res_dir}/result.json" 2>/dev/null &&
+	[[ -z "$(ls -A "${res_dir}/minion/minion_jobs" 2>/dev/null)" ]]; then
+	pass "salt-call: SALT_RESULT_FILE captures return, no job cache entry"
+else
+	fail "salt-call: SALT_RESULT_FILE captures return, no job cache entry"$'\n'"$(cat "${res_dir}/result.json" 2>/dev/null)"
+fi
+
+# 16b. Failing state: exit code preserved, cached retcode in the result
+rc=0
+docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" \
+	-e SALT_RESULT_FILE=/app/cache/result.json \
+	"${IMG}" salt-call state.apply fail >/dev/null 2>&1 || rc=$?
+if [[ ${rc} -eq 2 ]] && grep -q '"retcode": 2' "${res_dir}/result.json" 2>/dev/null; then
+	pass "salt-call: SALT_RESULT_FILE keeps retcode passthrough (rc=${rc})"
+else
+	fail "salt-call: SALT_RESULT_FILE keeps retcode passthrough (rc=${rc})"$'\n'"$(cat "${res_dir}/result.json" 2>/dev/null)"
+fi
+
+# 16c. salt-ssh: per-target returns via redirected master_job_cache —
+# nothing lands in the msgpack job cache
+docker run --rm -v "${res_dir}:/app/cache" -e SALT_RESULT_FILE=/app/cache/result.json \
+	-e SALT_ROSTER=$'web1:\n  host: 127.0.0.1\n  port: 2' \
+	"${IMG}" salt-ssh web1 test.ping >/dev/null 2>&1 || true
+if grep -q '"web1"' "${res_dir}/result.json" 2>/dev/null &&
+	[[ -z "$(find "${res_dir}/master/jobs" -name jid 2>/dev/null)" ]]; then
+	pass "salt-ssh: SALT_RESULT_FILE captures per-target returns, no job cache"
+else
+	fail "salt-ssh: SALT_RESULT_FILE captures per-target returns, no job cache"$'\n'"$(cat "${res_dir}/result.json" 2>/dev/null)"
+fi
+
+# 16d. salt mode: dispatch honors the returner (patched Salt)
+docker run --rm -v "${res_dir}:/app/cache" -e SALT_RESULT_FILE=/app/cache/result.json \
+	"${IMG}" salt -L salt-push test.ping >/dev/null 2>&1 || true
+if grep -q '"fun": "test.ping"' "${res_dir}/result.json" 2>/dev/null &&
+	grep -q '"tgt": "salt-push"' "${res_dir}/result.json" 2>/dev/null &&
+	[[ -z "$(ls -A "${res_dir}/minion/minion_jobs" 2>/dev/null)" ]]; then
+	pass "salt: SALT_RESULT_FILE captures dispatch return via returner"
+else
+	fail "salt: SALT_RESULT_FILE captures dispatch return via returner"$'\n'"$(cat "${res_dir}/result.json" 2>/dev/null)"
+fi
+rm -rf "${res_dir}"
+
+# 17. Build-arg-baked package is importable by the onedir interpreter
 if [[ -n ${BAKED} ]]; then
 	if docker run --rm "${BAKED}" /opt/saltstack/salt/bin/python3 -c "import saltext.github" 2>&1; then
 		pass "baked: import saltext.github"

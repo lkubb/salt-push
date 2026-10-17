@@ -1,0 +1,70 @@
+Make resource dispatch (salt-call -r) honor returners (--return) and
+the local job cache (cache_jobs) — it bypassed caller.py's handling of
+both — and render merged state results with the highstate outputter.
+Candidate for upstreaming to Salt.
+
+diff --git i/salt/cli/caller.py w/salt/cli/caller.py
+index 4d34cd5396..722d5db7a3 100644
+--- i/salt/cli/caller.py
++++ w/salt/cli/caller.py
+@@ -124,7 +124,45 @@ class BaseCaller:
+         Call the module
+         """
+         if self.opts.get("resources_dispatch"):
+-            return self._call_with_resources()
++            def _get_job_ret(ret):
++                job_ret = {
++                    "id": self.opts["id"],
++                    "fun": self.opts["fun"],
++                    "tgt": self.opts.get("resources_tgt", "*"),
++                    "tgt_type": self.opts.get("resources_tgt_type", "glob"),
++                    "jid": salt.utils.jid.gen_jid(self.opts),
++                    "pid": os.getpid(),
++                    "success": True,
++                } | ret
++                metadata = self.opts.get("metadata")
++                if metadata is not None:
++                    metadata = salt.utils.args.yamlify_arg(metadata)
++                if metadata is not None:
++                    job_ret["metadata"] = metadata
++                return job_ret
++
++            ret = self._call_with_resources()
++            returners = self.opts.get("return", "").split(",")
++            job_ret = None
++            if returners:
++                job_ret = job_ret or _get_job_ret(ret)
++                for returner in returners:
++                    if not returner:  # if we got an empty returner somehow, skip
++                        continue
++                    try:
++                        self.minion.returners[f"{returner}.returner"](job_ret)
++                    except Exception:  # pylint: disable=broad-except
++                        pass
++            if self.opts["cache_jobs"] and (
++                self.opts["local"]
++                or self.opts.get("file_client", False) == "local"
++                or self.opts.get("master_type") == "disable"
++            ):
++                job_ret = job_ret or _get_job_ret(ret)
++                # Local job cache has been enabled
++                salt.utils.minion.cache_jobs(self.opts, job_ret["jid"], _get_job_ret(ret))
++            return ret
++
+         ret = {}
+         fun = self.opts["fun"]
+         ret["jid"] = salt.utils.jid.gen_jid(self.opts)
+@@ -429,7 +467,11 @@ class BaseCaller:
+             merged = self._merge_resource_state_results(
+                 minion_ret, resource_targets, results
+             )
+-            return {"return": merged, "retcode": self._aggregate_retcode(merged)}
++            return {
++                "return": merged,
++                "retcode": self._aggregate_retcode(merged),
++                "out": "highstate",
++            }
+ 
+         # 4. Output: bare value if exactly one target ran, dict otherwise.
+         if not results:
+

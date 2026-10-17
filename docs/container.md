@@ -33,6 +33,12 @@ Three more rules govern the entrypoint:
   entirely and always runs the plain binaries (as in upstream's
   examples).
 
+Stdout carries only the tool's output — the entrypoint's and
+upstream's own messages go to stderr — so e.g.
+`docker run … salt-call --out json test.ping | jq` works. For
+structured results without giving up human-readable console output,
+see `SALT_RESULT_FILE` below.
+
 All modes run as the **`salt` user** (like upstream's salt-master),
 remapped to `PUID`/`PGID` when set. Set `SALT_PUSH_USER=root` for
 operations that need root inside the container.
@@ -90,6 +96,12 @@ Target types without `-r` support (nodegroup, ipcidr, pillar, range)
 are not translated. When only a single target matches, the result is
 printed bare instead of keyed per target — `salt-call -r` semantics.
 
+The image carries a small patch to the bundled Salt
+(`assets/patches/`, a candidate for upstreaming): dispatch honors
+returners (`--return`, which `SALT_RESULT_FILE` rides on) and
+`cache_jobs`, and merged state runs render with the highstate
+outputter.
+
 #### Inspecting resources
 
 To inspect what is targetable, use the bundled `resource` execution
@@ -142,22 +154,23 @@ or CLI flags.
 
 ## Environment variables
 
-| Variable                                   | Default     | Purpose                                                                                                                                                                                                                             |
-| ------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SALT_PUSH_USER`                           | `salt`      | user the tool runs as; set `root` to skip dropping privileges                                                                                                                                                                       |
-| `PUID` / `PGID`                            | `1000`      | remap the `salt` user's UID/GID (e.g. to match a CI runner's workspace ownership)                                                                                                                                                   |
-| `SALT_MINION_ID`                           | `salt-push` | minion `id` (stable by default so cache keys don't churn with container hostnames)                                                                                                                                                  |
-| `SALT_LOG_LEVEL`                           | `warning`   | console log level (what CI captures)                                                                                                                                                                                                |
-| `SALT_LOGFILE_LEVEL`                       | `info`      | file log level                                                                                                                                                                                                                      |
-| `SALT_FORCE_COLOR`                         | unset       | `true` passes `--force-color` — colored output without a TTY (CI log viewers render ANSI). Locally, `docker run -t` suffices                                                                                                        |
-| `SALT_PUSH_DIR`                            | `/app`      | base directory for the whole mount tree above (srv, cache, config, ssh, logs)                                                                                                                                                       |
-| `SALT_PILLAR`                              | unset       | inline pillar for the local minion (`salt-call`/`salt` modes): a YAML mapping served via `ext_pillar` — recursively merged over mounted pillar by default, but list-type keys are replaced                                          |
-| `SALT_RESOURCES`                           | unset       | inline resource declarations: YAML placed under the `resources:` pillar key — same `ext_pillar` mechanism as `SALT_PILLAR`, merged after it, so it wins for that key. E.g. `SALT_RESOURCES='github: {resource_ids: [myorg/repo1]}'` |
-| `SALT_ROSTER`                              | unset       | inline roster contents for `salt-ssh`; takes precedence over a mounted `/app/roster`                                                                                                                                                |
-| `SALT_MINION_CONFIG`                       | unset       | inline minion config (YAML, `salt-call`/`salt` modes), merged over the generated config *and* any `/app/config/minion.d` drop-ins                                                                                                   |
-| `SALT_SSH_CONFIG`                          | unset       | inline master config for `salt-ssh` (YAML), merged over the generated config *and* any `/app/config/ssh.d` drop-ins                                                                                                                 |
-| `PYTHON_PACKAGES` / `PYTHON_PACKAGES_FILE` | unset       | extra pip packages installed via `salt-pip` at container start (upstream mechanism)                                                                                                                                                 |
-| `DEBUG`                                    | unset       | `true` enables shell tracing                                                                                                                                                                                                        |
+| Variable                                   | Default     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SALT_PUSH_USER`                           | `salt`      | user the tool runs as; set `root` to skip dropping privileges                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `PUID` / `PGID`                            | `1000`      | remap the `salt` user's UID/GID (e.g. to match a CI runner's workspace ownership)                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `SALT_MINION_ID`                           | `salt-push` | minion `id` (stable by default so cache keys don't churn with container hostnames)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `SALT_LOG_LEVEL`                           | `warning`   | console log level (what CI captures)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `SALT_LOGFILE_LEVEL`                       | `info`      | file log level                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `SALT_FORCE_COLOR`                         | unset       | `true` passes `--force-color` — colored output without a TTY (CI log viewers render ANSI). Locally, `docker run -t` suffices                                                                                                                                                                                                                                                                                                                                                                    |
+| `SALT_PUSH_DIR`                            | `/app`      | base directory for the whole mount tree above (srv, cache, config, ssh, logs)                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `SALT_PILLAR`                              | unset       | inline pillar for the local minion (`salt-call`/`salt` modes): a YAML mapping served via `ext_pillar` — recursively merged over mounted pillar by default, but list-type keys are replaced                                                                                                                                                                                                                                                                                                      |
+| `SALT_RESOURCES`                           | unset       | inline resource declarations: YAML placed under the `resources:` pillar key — same `ext_pillar` mechanism as `SALT_PILLAR`, merged after it, so it wins for that key. E.g. `SALT_RESOURCES='github: {resource_ids: [myorg/repo1]}'`                                                                                                                                                                                                                                                             |
+| `SALT_ROSTER`                              | unset       | inline roster contents for `salt-ssh`; takes precedence over a mounted `/app/roster`                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `SALT_MINION_CONFIG`                       | unset       | inline minion config (YAML, `salt-call`/`salt` modes), merged over the generated config *and* any `/app/config/minion.d` drop-ins                                                                                                                                                                                                                                                                                                                                                               |
+| `SALT_RESULT_FILE`                         | unset       | write the job return as JSON to this path (put it under a writable mount), via the bundled `push_result` returner — failed states included. `salt-call`: `{jid, fun, fun_args, return, retcode, id, …}` via an appended `--return`; `salt`: same, with `tgt`/`tgt_type` instead of `fun_args`; `salt-ssh`: `{jid, returns: {target: return}}` via a redirected `master_job_cache`, which also keeps job returns out of the msgpack cache under `/app/cache/master/jobs`. Absent when no job ran |
+| `SALT_SSH_CONFIG`                          | unset       | inline master config for `salt-ssh` (YAML), merged over the generated config *and* any `/app/config/ssh.d` drop-ins                                                                                                                                                                                                                                                                                                                                                                             |
+| `PYTHON_PACKAGES` / `PYTHON_PACKAGES_FILE` | unset       | extra pip packages installed via `salt-pip` at container start (upstream mechanism)                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `DEBUG`                                    | unset       | `true` enables shell tracing                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ## Hardened config defaults
 
@@ -166,9 +179,10 @@ DNS of ephemeral container IPs yields nothing and stalls startup where
 resolvers are slow. Override it via a drop-in in
 `/app/config/minion.d/` when needed.
 
-No equivalent exists for salt-ssh's job returns: it writes them (full
-state results, including diffs) under `/app/cache/master/jobs`
-unconditionally — Salt offers no config switch. Mount `/app/cache`
+Salt-ssh writes its job returns (full state results, including diffs)
+under `/app/cache/master/jobs` unconditionally — Salt offers no config
+switch. Setting `SALT_RESULT_FILE` redirects them to the bundled JSON
+returner instead, so nothing lands there; otherwise mount `/app/cache`
 accordingly, or persist only selected subpaths.
 
 ## Baking Python packages at build time

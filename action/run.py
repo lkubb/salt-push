@@ -8,6 +8,7 @@ Docker (tests/test_run.py).
 """
 
 import html
+import json
 import os
 import re
 import secrets
@@ -49,6 +50,11 @@ LOG_LEVEL_INPUTS = {
     "SALT_LOGFILE_LEVEL": "log-file-level",
 }
 SUMMARY_LIMIT = 100_000
+# Where the container drops each command's job return (results input);
+# lives in the always-mounted cache dir, read and removed after each command.
+RESULT_FILE = ".salt-push-result.json"
+# GitHub rejects step outputs above 1 MB
+OUTPUT_LIMIT = 1_000_000
 
 
 class ConfigError(Exception):
@@ -94,6 +100,14 @@ def validate_log_levels(env):
             )
 
 
+def resolve_host_path(value, workspace):
+    """Resolve an input path against the workspace; ':' would break -v syntax."""
+    path = value if os.path.isabs(value) else os.path.join(workspace, value)
+    if ":" in path:
+        raise ConfigError(f"path '{value}' contains ':' and cannot be bind-mounted")
+    return path
+
+
 def build_docker_args(env, workspace, uid, gid):
     """Construct the docker arguments between 'run' and the image name.
 
@@ -106,6 +120,9 @@ def build_docker_args(env, workspace, uid, gid):
     notices = []
     if env.get("SP_FORCE_COLOR") == "true":
         args.extend(["-e", "SALT_FORCE_COLOR=true"])
+    # A results-filter alone implies results collection (cache-paths style)
+    if env.get("SP_RESULTS") == "true" or env.get("SP_RESULTS_FILTER"):
+        args.extend(["-e", f"SALT_RESULT_FILE=/app/cache/{RESULT_FILE}"])
     for var in PASSTHROUGH_VARS:
         if env.get(var):
             args.extend(["-e", var])
@@ -113,10 +130,7 @@ def build_docker_args(env, workspace, uid, gid):
         args.extend(["-e", name])
 
     def host_path(value):
-        path = value if os.path.isabs(value) else os.path.join(workspace, value)
-        if ":" in path:
-            raise ConfigError(f"path '{value}' contains ':' and cannot be bind-mounted")
-        return path
+        return resolve_host_path(value, workspace)
 
     def mount_ro(value, dest):
         path = host_path(value)
@@ -273,6 +287,56 @@ def format_summary(results, log_bytes):
     return "\n".join(parts) + "\n"
 
 
+def validate_results_filter(expression, run=subprocess.run, which=shutil.which):
+    """Fail fast on results-filter problems: jq missing or a jq compile
+    error (exit 3), before any command runs. Runtime behavior against null
+    input is not meaningful, so other exit codes pass."""
+    if not expression:
+        return
+    if which("jq") is None:
+        raise ConfigError("results-filter requires jq on the runner")
+    proc = run(["jq", "-n", "-c", expression], capture_output=True, text=True)
+    if proc.returncode == 3:
+        raise ConfigError(f"invalid results-filter jq expression: {proc.stderr.strip()}")
+
+
+def apply_results_filter(expression, result, run=subprocess.run):
+    """Transform one command's result with the jq expression. A runtime
+    error yields None with a warning — the command itself succeeded, a
+    transform typo must not fail the run after states were applied."""
+    proc = run(
+        ["jq", "-c", expression],
+        input=json.dumps(result),
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        print(
+            f"::warning::salt-push: results-filter failed: {proc.stderr.strip()}",
+            flush=True,
+        )
+        return None
+    values = [json.loads(line) for line in proc.stdout.splitlines()]
+    if len(values) == 1:
+        return values[0]
+    return values or None
+
+
+def read_result(path):
+    """Read and remove the result file the container wrote for one command
+    (results input). None when the container never wrote it."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def run_command(docker_args, image, argv, log):
     """Run one container, streaming output to stdout and the log file."""
     proc = subprocess.Popen(
@@ -299,6 +363,7 @@ def main(env=os.environ):
         if shutil.which("docker") is None:
             raise ConfigError("a Linux runner with Docker is required")
         validate_log_levels(env)
+        validate_results_filter(env.get("SP_RESULTS_FILTER", ""))
         docker_args, notices = build_docker_args(
             env, env["GITHUB_WORKSPACE"], os.getuid(), os.getgid()
         )
@@ -318,6 +383,16 @@ def main(env=os.environ):
         {"line": line, "rc": None, "start": 0, "end": 0, "duration": 0.0}
         for line, _ in commands
     ]
+    results_filter = env.get("SP_RESULTS_FILTER", "")
+    collect = env.get("SP_RESULTS") == "true" or bool(results_filter)
+    command_results = []
+    result_path = os.path.join(
+        resolve_host_path(env["SP_CACHE_DIR"], env["GITHUB_WORKSPACE"]), RESULT_FILE
+    )
+    if collect:
+        # A restored cache ('.') may carry a stale result file from an
+        # earlier run; the container rewrites it, but not if it dies first.
+        read_result(result_path)
     log_path = os.path.join(env["RUNNER_TEMP"], "salt-push-output.log")
     with open(log_path, "wb") as log:
         for result, (line, argv) in zip(results, commands, strict=True):
@@ -334,6 +409,11 @@ def main(env=os.environ):
             result["rc"] = rc
             print(f"::{guard}::", flush=True)
             print("::endgroup::", flush=True)
+            if collect:
+                result = read_result(result_path)
+                if results_filter:
+                    result = apply_results_filter(results_filter, result)
+                command_results.append({"command": line, "result": result})
             if rc != 0:
                 failed = line
                 print(
@@ -344,6 +424,17 @@ def main(env=os.environ):
 
     with open(env["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
         out.write(f"exit-code={rc}\nfailed-command={failed}\n")
+        if collect:
+            # Compact separators keep it small and single-line (json.dumps
+            # escapes control characters inside strings).
+            payload = json.dumps(command_results, separators=(",", ":"))
+            if len(payload) > OUTPUT_LIMIT:
+                print(
+                    "::warning::salt-push: results output exceeds GitHub's"
+                    " 1 MB step output limit and may be dropped",
+                    flush=True,
+                )
+            out.write(f"results={payload}\n")
     if env.get("SP_SUMMARY") == "true":
         with open(log_path, "rb") as log:
             log_bytes = log.read()

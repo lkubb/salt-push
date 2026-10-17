@@ -72,11 +72,19 @@ user_roster="${SALT_ROSTER:-}"
 user_pillar="${SALT_PILLAR:-}"
 user_minion_config="${SALT_MINION_CONFIG:-}"
 user_ssh_config="${SALT_SSH_CONFIG:-}"
+user_result_file="${SALT_RESULT_FILE:-}"
 
 # Upstream helpers: logging, map_uidgid and
 # install_python_additional_packages. Not nounset-safe, so no set -u here.
 # shellcheck source=/dev/null
 source "${SALT_RUNTIME_DIR}/functions.sh"
+
+# Upstream logs info/debug chatter to stdout (warn/error already go to
+# stderr). Keep stdout reserved for the tool's own output, so e.g.
+# `docker run … salt-call --out json … | jq` works.
+log_info() { echo >&2 "[INFO] $*"; }
+# shellcheck disable=SC2329  # invoked by the sourced upstream helpers
+log_debug() { if [[ ${DEBUG,,} == true ]]; then echo >&2 "[DEBUG] $*"; fi; }
 
 DEBUG="${DEBUG:-}"
 [[ ${DEBUG,,} == true ]] && set -o xtrace
@@ -150,6 +158,26 @@ if [[ -n ${user_roster} ]]; then
 	printf '%s\n' "${user_roster}" >"${roster_file}"
 fi
 
+# SALT_RESULT_FILE: route the job return through the bundled push_result
+# returner, which dumps it as JSON — the salt process writes the file
+# itself, no job-cache post-processing. salt-call/salt get --return
+# appended; salt-ssh writes returns through master_job_cache, redirected
+# to the same returner (which also keeps job returns out of the msgpack
+# cache under cache/master/jobs).
+result_minion_extra=""
+result_master_extra=""
+result_args=()
+if [[ -n ${user_result_file} ]]; then
+	rm -f "${user_result_file}" 2>/dev/null || true
+	result_minion_extra="
+push_result.file: ${user_result_file}"
+	result_master_extra="
+push_result.file: ${user_result_file}
+push_result.accumulate: True
+master_job_cache: push_result"
+	result_args=(--return push_result)
+fi
+
 cat >"${SALT_ROOT_DIR}/minion" <<EOF
 id: ${SALT_MINION_ID}
 file_client: local
@@ -164,11 +192,12 @@ cachedir: ${SALT_PUSH_DIR}/cache/minion
 # which breaks under PUID remapping and wouldn't persist in the cache mount.
 extension_modules: ${SALT_PUSH_DIR}/cache/minion/extmods
 log_file: ${SALT_PUSH_DIR}/logs/minion
-log_level_logfile: ${SALT_LOGFILE_LEVEL}
+log_level_logfile: ${SALT_LOGFILE_LEVEL}${result_minion_extra}
 # Reverse DNS of ephemeral container IPs yields nothing and stalls startup
 # where resolvers are slow.
 enable_fqdns_grains: False
-# Custom modules shipped with this image (e.g. resource.list)
+# Custom modules/returners shipped with this image (e.g. resource.list,
+# push_result)
 module_dirs:
   - /opt/salt-push
 default_include: ${SALT_PUSH_DIR}/config/minion.d/*.conf${minion_include_extra}
@@ -192,10 +221,13 @@ known_hosts_file: ${SALT_PUSH_DIR}/ssh/known_hosts
 log_file: ${SALT_PUSH_DIR}/logs/ssh
 ssh_log_file: ${SALT_PUSH_DIR}/logs/ssh
 log_level_logfile: ${SALT_LOGFILE_LEVEL}
+# Custom modules/returners shipped with this image (e.g. push_result)
+module_dirs:
+  - /opt/salt-push${result_master_extra}
 default_include: ${SALT_PUSH_DIR}/config/ssh.d/*.conf${ssh_include_extra}
 EOF
 
-install_python_additional_packages
+install_python_additional_packages 1>&2
 
 SALT_FORCE_COLOR="${SALT_FORCE_COLOR:-}"
 color_args=()
@@ -204,7 +236,7 @@ color_args=()
 
 case "${mode}" in
 salt-call)
-	set -- salt-call --local --retcode-passthrough "$@"
+	set -- salt-call --local --retcode-passthrough "${result_args[@]}" "$@"
 	;;
 salt)
 	# Mirror the `salt` CLI: optional targeting shorthand, then the target
@@ -253,7 +285,7 @@ salt)
 			exit 1
 		fi
 	fi
-	set -- salt-call --local --retcode-passthrough -r "${tgt_args[@]}" "$@"
+	set -- salt-call --local --retcode-passthrough -r "${tgt_args[@]}" "${result_args[@]}" "$@"
 	;;
 salt-ssh)
 	[[ -f ${roster_file} ]] || log_warn "No roster at ${roster_file} (mount one or set SALT_ROSTER)"

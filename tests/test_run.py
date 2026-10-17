@@ -5,6 +5,7 @@ Run with: python3 -m unittest discover -s tests
 
 import importlib.util
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -145,6 +146,16 @@ class BuildDockerArgsTest(unittest.TestCase):
         with self.assertRaises(run.ConfigError):
             self.build(SP_SSH_DIR="a:b")
 
+    def test_results_env_opt_in(self):
+        args = self.build(SP_RESULTS="true")
+        env_flags = [args[i + 1] for i, arg in enumerate(args) if arg == "-e"]
+        self.assertIn("SALT_RESULT_FILE=/app/cache/.salt-push-result.json", env_flags)
+        self.assertNotIn("SALT_RESULT_FILE", " ".join(self.build()))
+
+    def test_results_filter_implies_results(self):
+        args = self.build(SP_RESULTS_FILTER=".return")
+        self.assertIn("SALT_RESULT_FILE=/app/cache/.salt-push-result.json", args)
+
     def test_passthrough_and_env_pass(self):
         args = self.build(
             SP_FORCE_COLOR="true",
@@ -166,6 +177,64 @@ class BuildDockerArgsTest(unittest.TestCase):
         self.assertNotIn("SALT_RESOURCES", env_flags)  # empty — not forwarded
         self.assertIn("GH_TOKEN", env_flags)
         self.assertIn("OTHER", env_flags)
+
+
+class ReadResultTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.path = os.path.join(self.dir.name, run.RESULT_FILE)
+
+    def write(self, text):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def test_reads_and_removes(self):
+        self.write('{"return": true, "retcode": 0}')
+        self.assertEqual(run.read_result(self.path), {"return": True, "retcode": 0})
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_missing_file_is_none(self):
+        self.assertIsNone(run.read_result(self.path))
+
+    def test_invalid_json_is_none_and_removed(self):
+        self.write("not json")
+        self.assertIsNone(run.read_result(self.path))
+        self.assertFalse(os.path.exists(self.path))
+
+
+@unittest.skipUnless(shutil.which("jq"), "requires jq")
+class ResultsFilterTest(unittest.TestCase):
+    def test_valid_expression_passes(self):
+        run.validate_results_filter(".return | map_values(.changes)")
+
+    def test_empty_expression_skips_jq_entirely(self):
+        run.validate_results_filter("", which=lambda _name: None)
+
+    def test_compile_error_is_config_error(self):
+        with self.assertRaises(run.ConfigError) as ctx:
+            run.validate_results_filter(".return |")
+        self.assertIn("results-filter", str(ctx.exception))
+
+    def test_missing_jq_is_config_error(self):
+        with self.assertRaises(run.ConfigError):
+            run.validate_results_filter(".", which=lambda _name: None)
+
+    def test_field_selection(self):
+        self.assertEqual(
+            run.apply_results_filter(".retcode", {"retcode": 2, "return": {"x": 1}}),
+            2,
+        )
+
+    def test_identity_and_null(self):
+        self.assertEqual(run.apply_results_filter(".", {"a": 1}), {"a": 1})
+        self.assertIsNone(run.apply_results_filter(".", None))
+
+    def test_multiple_outputs_become_a_list(self):
+        self.assertEqual(run.apply_results_filter(".[]", [1, 2]), [1, 2])
+
+    def test_runtime_error_yields_none(self):
+        self.assertIsNone(run.apply_results_filter('error("boom")', {"a": 1}))
 
 
 class ValidateLogLevelsTest(unittest.TestCase):

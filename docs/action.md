@@ -84,18 +84,32 @@ with:
 | `user`               | —                                | → `SALT_PUSH_USER` (e.g. `root`)                                                                                                                                                                                                         |
 | `python-packages`    | —                                | → `PYTHON_PACKAGES` (runtime install — slow; prefer [baking](container.md#baking-python-packages-at-build-time))                                                                                                                         |
 | `summary`            | `'false'`                        | `'true'` appends a per-command status table (result, duration) with collapsible, tail-truncated ANSI-stripped output (~100 KB total) to the job summary                                                                                  |
+| `results`            | `'false'`                        | `'true'` captures each command's Salt return from the job cache (removed from it afterwards) and exposes them via the `results` output                                                                                                   |
+| `results-filter`     | —                                | jq expression applied to each command's result before embedding — trim large returns to the fields you need; implies `results: 'true'`, requires `jq` on the runner                                                                      |
 
 ## Outputs
 
-| Output           | Purpose                                                |
-| ---------------- | ------------------------------------------------------ |
-| `exit-code`      | exit code of the failing command, `0` if all succeeded |
-| `failed-command` | the command line that failed (empty on success)        |
+| Output           | Purpose                                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `exit-code`      | exit code of the failing command, `0` if all succeeded                                                                            |
+| `failed-command` | the command line that failed (empty on success)                                                                                   |
+| `results`        | with `results: 'true'`: JSON array `[{"command": …, "result": …}, …]` of executed commands' job returns; parse with `fromJSON(…)` |
 
 Outputs are written even when the action fails, so they are readable
-with `continue-on-error: true` on the step. Salt's human-readable
-output is not parsed any further — use `--out=json` in your command if
-you need structured results.
+with `continue-on-error: true` on the step.
+
+Salt's console output is never parsed — `results` reads each return
+from Salt's job cache instead, so the log stays human-readable. The
+per-command `result` matches the container's `SALT_RESULT_FILE` shapes
+(see [the container docs](container.md#environment-variables)). Useful
+e.g. to gate a PR on predicted changes, which exit codes can't express
+(`test=True` exits `0` on pending changes). Mind GitHub's 1 MB step
+output limit — large highstate returns with diffs can exceed it (a
+warning is emitted). Trim them with `results-filter`, e.g.
+`'.return | map_values(.changes) | with_entries(select(.value != {}))'`
+keeps only states with changes. The filter's syntax is validated
+before any command runs; a filter that errors at runtime yields `null`
+for that command, with a warning.
 
 ## Behavior notes
 
@@ -126,8 +140,10 @@ you need structured results.
   archives and job returns with pillar values substituted in under
   `master/`, with no config switch to prevent it), so leave caching
   disabled (the default) on public repos unless the cached content is
-  harmless. The same scoping also prevents the reverse: a PR cannot
-  poison the default branch's cache.
+  harmless. (With `results` collection enabled, salt-ssh's job returns
+  are diverted to the results flow instead of the cache; its state
+  archives under `master/` remain.) The same scoping also prevents the
+  reverse: a PR cannot poison the default branch's cache.
 - **`cache-mode` does not restrict who can read your caches.** The
   workflow-level
   [`cache-mode`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#cache-mode)
@@ -153,12 +169,13 @@ you need structured results.
   instead of a failure).
 - **Salt output can leak secrets.** State `changes:` diffs print
   rendered content — a state writing a token into a file shows it in
-  the log, and `summary: 'true'` copies it into the job summary. The
-  same goes for Salt's file logs captured via `logs-dir`: at `debug`
-  level they include rendered states and pillar values, so treat
-  uploaded log artifacts as sensitive. GitHub only masks *registered*
-  secret values, not data derived inside the container. For states
-  that handle sensitive data, set e.g. `show_changes: False` on
+  the log, `summary: 'true'` copies it into the job summary, and
+  `results: 'true'` exposes the raw returns as a step output. The same
+  goes for Salt's file logs captured via `logs-dir`: at `debug` level
+  they include rendered states and pillar values, so treat uploaded
+  log artifacts as sensitive. GitHub only masks *registered* secret
+  values, not data derived inside the container. For states that
+  handle sensitive data, set e.g. `show_changes: False` on
   `file.managed` or keep secret-bearing values out of diffs. Values
   from the `secrets` context (and tokens minted by
   `create-github-app-token`) are already runner-masked. Register a
