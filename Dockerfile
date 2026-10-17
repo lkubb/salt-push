@@ -16,6 +16,6 @@ LABEL org.opencontainers.image.source="https://github.com/lkubb/salt-push" \
       org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["/sbin/push-entrypoint.sh"]
-# No default command: print push-workflow help (upstream's master needs
-# an explicit app:start)
+# No default command: print push-workflow help and fail (upstream's
+# master needs an explicit app:start)
 CMD []

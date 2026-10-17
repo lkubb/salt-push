@@ -95,11 +95,13 @@ check "salt-call: minion_config drop-in applied" 'dropin-works' \
 	docker run --rm -v "${FIXTURES}/minion_config:/app/config/minion.d:ro" "${IMG}" \
 	salt-call grains.get smoke_dropin
 
-# 10. No arguments defaults to highstate
-if docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" "${IMG}" salt-call >/dev/null 2>&1; then
-	pass "salt-call: default highstate"
+# 10. Bare salt-call behaves like the plain tool: usage error, non-zero exit
+rc=0
+out="$(docker run --rm "${IMG}" salt-call 2>&1)" || rc=$?
+if [[ ${rc} -ne 0 ]] && grep -q 'Usage: salt-call' <<<"${out}"; then
+	pass "salt-call: bare invocation prints usage, non-zero exit (rc=${rc})"
 else
-	fail "salt-call: default highstate"
+	fail "salt-call: bare invocation prints usage, non-zero exit (rc=${rc})"$'\n'"${out}"
 fi
 
 # 11. salt mode fans out to pillar-configured resources (per-target keys)

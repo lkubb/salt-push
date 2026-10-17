@@ -49,8 +49,8 @@ $ docker run --rm -it \
 
 `salt-call` always runs with `--local --retcode-passthrough`, so
 failed states yield a non-zero container exit code (`2` for failed
-states, `1` for errors). With no further arguments, it runs
-`state.highstate`.
+states, `1` for errors). Beyond those two flags, it behaves exactly
+like the plain tool.
 
 ### `salt` — managed resources
 

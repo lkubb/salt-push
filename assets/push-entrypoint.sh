@@ -6,7 +6,6 @@
 #   docker run --rm <image> salt [-ELGPCT] <target> [args] # resource dispatch (salt-call -r)
 #   docker run --rm <image> salt-ssh <target> [args...]    # salt-ssh
 #
-# `salt-call` defaults to `state.highstate` when no further arguments are given.
 # Anything else is handed to the upstream entrypoint unchanged.
 # (`docker exec` bypasses this entrypoint and always runs the plain binaries.)
 
@@ -19,7 +18,7 @@ salt-push — one-shot Salt in push mode (on top of docker-salt-master)
 Usage:
   salt-call [salt-call args...]
       Run salt-call --local --retcode-passthrough against the mounted
-      state tree. Defaults to state.highstate.
+      state tree.
   salt [-E|-L|-G|-P|-C|-T] <target> [args...]
       Dispatch to managed resources (salt-call -r) with per-target
       output, like the salt CLI. Resources are declared under the
@@ -55,6 +54,8 @@ help | -h | --help)
 	exit 0
 	;;
 "")
+	# Fail loudly: a CI job that lost its command must not silently
+	# do nothing (or worse, something implicit).
 	print_help >&2
 	exit 1
 	;;
@@ -203,7 +204,6 @@ color_args=()
 
 case "${mode}" in
 salt-call)
-	(($#)) || set -- state.highstate
 	set -- salt-call --local --retcode-passthrough "$@"
 	;;
 salt)
