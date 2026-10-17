@@ -28,7 +28,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -36,17 +36,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run shellcheck
-        run: shellcheck assets/*.sh tests/*.sh
+      - name: Install prek
+        run: python3 -m pip install "prek==${PREK_VERSION}"
+        env:
+          PREK_VERSION: '0.5.5'
+
+      - name: Install Prek Hooks
+        run: |
+          prek install-hooks
+
+      - name: Check ALL Files On Branch
+        run: |
+          prek run --show-diff-on-failure --color=always --all-files
 
       - name: Run action unit tests
         run: python3 -m unittest discover -s tests -v
 
-      - name: Run hadolint
-        run: docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile
-
-      - name: Run actionlint
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
   build:
     strategy:
@@ -82,7 +87,7 @@ jobs:
         with:
           context: .
           load: true
-          build-args: |
+          build-args: |-
             PYTHON_PACKAGES=saltext-github
           tags: salt-push:ci-baked
           cache-from: type=gha,scope=baked-${{ matrix.arch }}
@@ -105,7 +110,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
-          labels: |
+          labels: |-
             org.opencontainers.image.revision=${{ github.sha }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=build-${{ matrix.arch }}
@@ -128,7 +133,7 @@ jobs:
           retention-days: 1
 
   action-test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -169,7 +174,7 @@ jobs:
           pull: never
           resources: 'dummy: {resource_ids: [env-01]}'
           summary: 'true'
-          commands: |
+          commands: |-
             # comment and blank lines are skipped
 
             salt-call test.ping
@@ -184,7 +189,7 @@ jobs:
           pull: never
           states: tests/fixtures/srv/salt
           pillars: tests/fixtures/srv/pillar
-          commands: |
+          commands: |-
             salt-call state.apply fail
             salt-call test.ping
 
@@ -207,7 +212,7 @@ jobs:
           pull: never
           cache-key: action-test-${{ github.run_id }}
           cache-paths: keep
-          commands: |
+          commands: |-
             salt-call cmd.run 'mkdir -p /app/cache/keep && touch /app/cache/keep/marker /app/cache/drop-marker'
 
       - name: Drop local cache dir
@@ -233,7 +238,7 @@ jobs:
       - build
       - lint
       - action-test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
