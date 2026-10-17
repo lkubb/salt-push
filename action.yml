@@ -18,7 +18,7 @@ inputs:
       fail-fast. Blank lines and lines starting with '#' are skipped.
       Lines are split with shell quoting rules but never evaluated — no
       variable expansion, command substitution or globbing.
-    default: salt-call state.apply
+    default: salt '*' state.highstate
   pull:
     description: >-
       Image pull policy — always (default; protects shared self-hosted

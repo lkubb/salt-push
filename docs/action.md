@@ -5,7 +5,7 @@
 repository into the container and runs one or more commands
 sequentially (fail-fast), applying a highstate by default.
 
-**Prerequisites**: a Linux runner with Docker (e.g. `ubuntu-24.04`)
+**Prerequisites**: a Linux runner with Docker (e.g. `ubuntu-26.04`)
 and a prior `actions/checkout` step — paths are resolved relative to
 the workspace (absolute paths are allowed too).
 
@@ -26,7 +26,7 @@ A fuller example — applying an org-config repo (states + pillar in
 ```yaml
 jobs:
   apply:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     concurrency: org-apply  # never run two applies at once
     steps:
       - uses: actions/checkout@v7
@@ -51,7 +51,7 @@ On pull requests, surface the predicted changes for review instead:
 ```yaml
 with:
   env-pass: APP_CLID APP_PRIV
-  commands: salt-call state.highstate test=True
+  commands: salt '*' state.highstate test=True
 ```
 
 ## Inputs
@@ -60,7 +60,7 @@ with:
 | -------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `image`              | `ghcr.io/lkubb/salt-push:latest` | container image (full reference)                                                                                                                                                                                                                                                                                                                                                                              |
 | `pull`               | `always`                         | image pull policy: `always`, `missing` or `never`                                                                                                                                                                                                                                                                                                                                                             |
-| `commands`           | `salt-call state.apply`          | one command per line, sequential, fail-fast; blank lines and `#` comments skipped; shell-style quoting, but no evaluation                                                                                                                                                                                                                                                                                     |
+| `commands`           | `salt '*' state.highstate`       | one command per line, sequential, fail-fast; blank lines and `#` comments skipped; shell-style quoting, but no evaluation                                                                                                                                                                                                                                                                                     |
 | `states`             | `srv/salt`                       | state tree → `/app/srv/salt` (ro); the default is skipped if absent, a set path must exist, `''` disables                                                                                                                                                                                                                                                                                                     |
 | `pillars`            | `srv/pillar`                     | pillar tree → `/app/srv/pillar` (ro); same semantics as `states`                                                                                                                                                                                                                                                                                                                                              |
 | `minion-pillar`      | —                                | → `SALT_PILLAR` (inline pillar for the local minion, merged over the mounted tree)                                                                                                                                                                                                                                                                                                                            |
