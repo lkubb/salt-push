@@ -92,7 +92,7 @@ def _resource_funcs():
         if init_fn in rfuncs:
             try:
                 rfuncs[init_fn](__opts__)
-            except Exception as exc:  # pylint: disable=broad-except
+            except Exception as exc:  # pylint: disable=broad-except  # noqa: BLE001
                 log.error("Failed to initialize resource type '%s': %s", rtype, exc)
     return rfuncs
 
@@ -109,7 +109,7 @@ def _render_grains(rfuncs, rtype, rid):
     tok = salt.loader.context.resource_ctxvar.set({"id": rid, "type": rtype})
     try:
         gdict = rfuncs[grains_fn]()
-    except Exception as exc:  # pylint: disable=broad-except
+    except Exception as exc:  # pylint: disable=broad-except  # noqa: BLE001
         log.warning("Failed to collect grains for resource %s:%s: %s", rtype, rid, exc)
         return None
     finally:

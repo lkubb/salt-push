@@ -22,7 +22,9 @@ def resolve(env):
     only valid when the input is empty too — the cache steps are skipped
     entirely then. '.' persists the whole cache dir.
     """
-    cache_dir = env.get("SP_CACHE_DIR") or os.path.join(env["RUNNER_TEMP"], "salt-push-cache")
+    cache_dir = env.get("SP_CACHE_DIR") or os.path.join(
+        env["RUNNER_TEMP"], "salt-push-cache"
+    )
     key = env.get("SP_CACHE_KEY") or "salt-push-{}-{}".format(
         env["SP_REF_NAME"], env["SP_RUN_ID"]
     )
@@ -52,8 +54,7 @@ def main(env=os.environ):
         out.write(f"cache-dir={cache_dir}\n")
         out.write(f"key={key}\n")
         out.write("cache-paths<<__SP_EOF__\n")
-        for path in paths:
-            out.write(path + "\n")
+        out.writelines(path + "\n" for path in paths)
         out.write("__SP_EOF__\n")
     return 0
 

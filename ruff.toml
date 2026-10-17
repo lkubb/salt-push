@@ -1,0 +1,17 @@
+line-length = 90
+
+# Names injected by the Salt loader into execution modules (assets/modules/)
+builtins = [
+    "__opts__",
+    "__context__",
+    "__grains__",
+    "__pillar__",
+    "__salt__",
+]
+
+target-version = "py311"
+
+[lint]
+extend-select = [
+    "A0",
+]

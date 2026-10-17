@@ -41,7 +41,10 @@ LOG_LEVELS = (
     "critical",
     "quiet",
 )
-LOG_LEVEL_INPUTS = {"SALT_LOG_LEVEL": "log-level", "SALT_LOGFILE_LEVEL": "log-file-level"}
+LOG_LEVEL_INPUTS = {
+    "SALT_LOG_LEVEL": "log-level",
+    "SALT_LOGFILE_LEVEL": "log-file-level",
+}
 SUMMARY_LIMIT = 100_000
 
 
@@ -169,9 +172,13 @@ def ensure_image(image, mode, run=subprocess.run):
             raise ConfigError(f"failed to pull image '{image}'")
     elif mode == "never":
         if not present():
-            raise ConfigError(f"image '{image}' is not present locally and pull is 'never'")
+            raise ConfigError(
+                f"image '{image}' is not present locally and pull is 'never'"
+            )
     else:
-        raise ConfigError(f"invalid pull policy '{mode}' (expected always, missing or never)")
+        raise ConfigError(
+            f"invalid pull policy '{mode}' (expected always, missing or never)"
+        )
 
 
 def image_identity(image, run=subprocess.run):
@@ -203,7 +210,9 @@ def describe_config(image, identity, pull, args, notices):
     """Human-readable resolved configuration. Contains env var *names* only
     — never forwarded values."""
     lines = [f"image: {image} ({identity})", f"pull policy: {pull}"]
-    env_names = [args[i + 1].split("=", 1)[0] for i, arg in enumerate(args) if arg == "-e"]
+    env_names = [
+        args[i + 1].split("=", 1)[0] for i, arg in enumerate(args) if arg == "-e"
+    ]
     lines.append("container env: " + " ".join(env_names))
     for i, arg in enumerate(args):
         if arg == "-v":
@@ -244,7 +253,14 @@ def format_summary(results, log_bytes):
         text = ANSI_COLOR.sub(
             "", log_bytes[result["start"] : result["end"]].decode("utf-8", "replace")
         ).strip("\n")
-        parts.extend(["", "<details>", f"<summary>{status(result)} {code(result['line'])}</summary>", ""])
+        parts.extend(
+            [
+                "",
+                "<details>",
+                f"<summary>{status(result)} {code(result['line'])}</summary>",
+                "",
+            ]
+        )
         parts.append("````")
         if len(text) > cap:
             parts.append("… (earlier output truncated)")
@@ -301,7 +317,7 @@ def main(env=os.environ):
     ]
     log_path = os.path.join(env["RUNNER_TEMP"], "salt-push-output.log")
     with open(log_path, "wb") as log:
-        for result, (line, argv) in zip(results, commands):
+        for result, (line, argv) in zip(results, commands, strict=True):
             print(f"::group::salt-push: {line}", flush=True)
             # Container output is untrusted: suspend workflow command
             # processing while it streams.
@@ -317,7 +333,10 @@ def main(env=os.environ):
             print("::endgroup::", flush=True)
             if rc != 0:
                 failed = line
-                print(f"::error::salt-push: command failed (exit {rc}): {line}", flush=True)
+                print(
+                    f"::error::salt-push: command failed (exit {rc}): {line}",
+                    flush=True,
+                )
                 break
 
     with open(env["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:

@@ -50,7 +50,9 @@ class ResolveTest(unittest.TestCase):
             resolve(SP_CACHE_PATHS="# only comments\n\n")
 
     def test_whitelist_resolved_against_cache_dir(self):
-        _, _, paths = resolve(SP_CACHE_PATHS="# keep only these\n\nminion/extmods\nkeep/*.p\n")
+        _, _, paths = resolve(
+            SP_CACHE_PATHS="# keep only these\n\nminion/extmods\nkeep/*.p\n"
+        )
         self.assertEqual(
             paths,
             [

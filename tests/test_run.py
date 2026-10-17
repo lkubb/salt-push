@@ -20,7 +20,9 @@ class ParseCommandsTest(unittest.TestCase):
         self.assertEqual(run.parse_commands("salt-call"), [("salt-call", ["salt-call"])])
 
     def test_blank_lines_and_comments_skipped(self):
-        commands = run.parse_commands("# comment\n\n   \nsalt-call test.ping\n  # indented\n")
+        commands = run.parse_commands(
+            "# comment\n\n   \nsalt-call test.ping\n  # indented\n"
+        )
         self.assertEqual(commands, [("salt-call test.ping", ["salt-call", "test.ping"])])
 
     def test_quoting(self):
@@ -29,9 +31,12 @@ class ParseCommandsTest(unittest.TestCase):
 
     def test_no_shell_evaluation(self):
         # Substitution, chaining and globbing stay literal arguments.
-        [(_, argv)] = run.parse_commands("salt-call test.ping $(touch /tmp/pwned); rm -rf *")
+        [(_, argv)] = run.parse_commands(
+            "salt-call test.ping $(touch /tmp/pwned); rm -rf *"
+        )
         self.assertEqual(
-            argv, ["salt-call", "test.ping", "$(touch", "/tmp/pwned);", "rm", "-rf", "*"]
+            argv,
+            ["salt-call", "test.ping", "$(touch", "/tmp/pwned);", "rm", "-rf", "*"],
         )
 
     def test_unbalanced_quote_is_config_error(self):
@@ -42,7 +47,8 @@ class ParseCommandsTest(unittest.TestCase):
 class ParseEnvNamesTest(unittest.TestCase):
     def test_whitespace_and_comma_separated(self):
         self.assertEqual(
-            run.parse_env_names("GH_TOKEN, OTHER\n  THIRD"), ["GH_TOKEN", "OTHER", "THIRD"]
+            run.parse_env_names("GH_TOKEN, OTHER\n  THIRD"),
+            ["GH_TOKEN", "OTHER", "THIRD"],
         )
 
     def test_empty(self):
@@ -64,7 +70,9 @@ class BuildDockerArgsTest(unittest.TestCase):
         self.env = {"SP_CACHE_DIR": os.path.join(self.workspace.name, "cache")}
 
     def build(self, **extra):
-        args, _ = run.build_docker_args({**self.env, **extra}, self.workspace.name, 1001, 118)
+        args, _ = run.build_docker_args(
+            {**self.env, **extra}, self.workspace.name, 1001, 118
+        )
         return args
 
     def notices(self, **extra):
@@ -80,9 +88,7 @@ class BuildDockerArgsTest(unittest.TestCase):
         args = self.build()
         self.assertEqual(args[:6], ["run", "--rm", "-e", "PUID=1001", "-e", "PGID=118"])
         self.assertTrue(os.path.isdir(self.env["SP_CACHE_DIR"]))
-        self.assertEqual(
-            self.mounts(args), [f"{self.env['SP_CACHE_DIR']}:/app/cache"]
-        )
+        self.assertEqual(self.mounts(args), [f"{self.env['SP_CACHE_DIR']}:/app/cache"])
 
     def test_absent_default_trees_skipped_with_notice(self):
         args, notices = run.build_docker_args(
@@ -119,11 +125,13 @@ class BuildDockerArgsTest(unittest.TestCase):
         os.makedirs(os.path.join(self.workspace.name, "fixtures/pillar"))
         args = self.build(SP_PILLAR="fixtures/pillar")
         self.assertIn(
-            f"{self.workspace.name}/fixtures/pillar:/app/srv/pillar:ro", self.mounts(args)
+            f"{self.workspace.name}/fixtures/pillar:/app/srv/pillar:ro",
+            self.mounts(args),
         )
         args = self.build(SP_PILLAR=os.path.join(self.workspace.name, "fixtures/pillar"))
         self.assertIn(
-            f"{self.workspace.name}/fixtures/pillar:/app/srv/pillar:ro", self.mounts(args)
+            f"{self.workspace.name}/fixtures/pillar:/app/srv/pillar:ro",
+            self.mounts(args),
         )
 
     def test_ssh_and_logs_dirs_created_and_writable(self):
@@ -173,7 +181,9 @@ class ValidateLogLevelsTest(unittest.TestCase):
 class DescribeConfigTest(unittest.TestCase):
     def test_names_only_no_values(self):
         args = ["run", "--rm", "-e", "PUID=1001", "-e", "GH_TOKEN", "-v", "/a:/app/cache"]
-        lines = run.describe_config("img:tag", "img@sha256:abc", "never", args, ["a notice"])
+        lines = run.describe_config(
+            "img:tag", "img@sha256:abc", "never", args, ["a notice"]
+        )
         self.assertEqual(
             lines,
             [
@@ -199,11 +209,15 @@ class ImageIdentityTest(unittest.TestCase):
         self.assertEqual(identity, "repo@sha256:digest")
 
     def test_id_fallback_for_local_images(self):
-        identity = run.image_identity("img", run=lambda *a, **k: self.Result(0, "sha256:id \n"))
+        identity = run.image_identity(
+            "img", run=lambda *a, **k: self.Result(0, "sha256:id \n")
+        )
         self.assertEqual(identity, "sha256:id")
 
     def test_unknown_on_inspect_failure(self):
-        self.assertEqual(run.image_identity("img", run=lambda *a, **k: self.Result(1)), "unknown")
+        self.assertEqual(
+            run.image_identity("img", run=lambda *a, **k: self.Result(1)), "unknown"
+        )
 
 
 class FormatDurationTest(unittest.TestCase):
@@ -216,7 +230,13 @@ class FormatDurationTest(unittest.TestCase):
 
 class FormatSummaryTest(unittest.TestCase):
     def result(self, line, rc, start=0, end=0, duration=1.0):
-        return {"line": line, "rc": rc, "start": start, "end": end, "duration": duration}
+        return {
+            "line": line,
+            "rc": rc,
+            "start": start,
+            "end": end,
+            "duration": duration,
+        }
 
     def test_statuses_and_skipped(self):
         log = b"pingfail"
@@ -229,7 +249,9 @@ class FormatSummaryTest(unittest.TestCase):
             log,
         )
         self.assertIn("| <code>salt-call test.ping</code> | ✅ | 1.0s |", summary)
-        self.assertIn("| <code>salt-call state.apply fail</code> | ❌ exit 2 | 1.0s |", summary)
+        self.assertIn(
+            "| <code>salt-call state.apply fail</code> | ❌ exit 2 | 1.0s |", summary
+        )
         self.assertIn("| <code>salt-call never.ran</code> | ⏭ skipped | — |", summary)
         self.assertIn("<summary>✅ <code>salt-call test.ping</code></summary>", summary)
         self.assertIn("ping", summary)
@@ -238,7 +260,7 @@ class FormatSummaryTest(unittest.TestCase):
         self.assertEqual(summary.count("<details>"), 2)
 
     def test_output_ansi_stripped(self):
-        log = "\x1b[0;32mSucceeded: 1\x1b[0;0m".encode()
+        log = b"\x1b[0;32mSucceeded: 1\x1b[0;0m"
         summary = run.format_summary([self.result("salt-call", 0, 0, len(log))], log)
         self.assertIn("Succeeded: 1", summary)
         self.assertNotIn("\x1b", summary)
@@ -250,7 +272,9 @@ class FormatSummaryTest(unittest.TestCase):
         self.assertIn("THE-END", summary)
 
     def test_table_cells_escaped(self):
-        summary = run.format_summary([self.result("salt-call cmd.run 'a | b <x>'", None)], b"")
+        summary = run.format_summary(
+            [self.result("salt-call cmd.run 'a | b <x>'", None)], b""
+        )
         self.assertIn("&#124;", summary)
         self.assertIn("&lt;x&gt;", summary)
 
