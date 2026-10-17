@@ -14,6 +14,9 @@ Two shapes, selected via config (push-entrypoint.sh sets the keys):
   ``push_result.accumulate: True``): per-target returns accumulated into
   ``{jid, returns: {target: return}}``. The master_job_cache interface
   stubs persist nothing else, so no msgpack job cache is written.
+
+With ``push_result.drop: True`` and no file configured (SALT_SCRUB_CACHE
+without SALT_RESULT_FILE), returns are discarded entirely.
 """
 
 import json
@@ -25,8 +28,8 @@ __virtualname__ = "push_result"
 
 
 def __virtual__():
-    if not __opts__.get("push_result.file"):
-        return False, "push_result.file is not configured"
+    if not (__opts__.get("push_result.file") or __opts__.get("push_result.drop")):
+        return False, "neither push_result.file nor push_result.drop is configured"
     return __virtualname__
 
 
@@ -44,6 +47,9 @@ def returner(ret):
     per-target returns (one call each, salt-ssh master_job_cache style)
     into a single document.
     """
+    if not __opts__.get("push_result.file"):
+        # push_result.drop mode: discard the return
+        return
     if not __opts__.get("push_result.accumulate"):
         _write(ret)
         return

@@ -120,6 +120,21 @@ inputs:
       Prefix fallback(s) used to restore the cache. Set to the empty string
       to only restore exact cache-key matches (never stale entries).
     default: salt-push-
+  scrub-cache:
+    description: >-
+      Keep known sensitive data out of the cache dir (sets
+      SALT_SCRUB_CACHE, enabled by default): job returns are discarded
+      instead of persisted (results capture still works), salt-ssh wipes
+      the remote thin dir after each session (its salt_state.tgz contains
+      rendered pillar), and known sensitive cache leftovers (job data,
+      compiled state data, cached grains/minion data, cached credentials)
+      are removed once after the last command — fail-fast exits included,
+      before the cache save. Defense in depth, not a cure — the
+      cache-paths whitelist
+      stays the primary control. Set 'false' to persist job returns via
+      cache-paths, or to keep the remote thin dir deployed (faster
+      repeated salt-ssh runs).
+    default: 'true'
 
   # 4 Runtime config
   env-pass:
@@ -237,6 +252,7 @@ runs:
         SP_SUMMARY: ${{ inputs.summary }}
         SP_RESULTS: ${{ inputs.results }}
         SP_RESULTS_FILTER: ${{ inputs.results-filter }}
+        SP_SCRUB_CACHE: ${{ inputs.scrub-cache }}
         SALT_PILLAR: ${{ inputs.minion-pillar }}
         SALT_RESOURCES: ${{ inputs.resources }}
         SALT_ROSTER: ${{ inputs.roster }}

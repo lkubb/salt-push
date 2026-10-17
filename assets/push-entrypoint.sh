@@ -25,6 +25,9 @@ Usage:
       'resources:' pillar key; inspect them via 'salt-call resource.list'.
   salt-ssh <target> [salt-ssh args...]
       Run salt-ssh using the roster at /app/roster.
+  scrub
+      Remove known sensitive cache paths and exit (see SALT_SCRUB_CACHE;
+      pairs with SALT_SCRUB_CACHE=defer for multi-command sequences).
 
 Common mounts:
   /app/srv/salt            state tree (file_roots)
@@ -44,10 +47,40 @@ Docs: https://github.com/lkubb/salt-push
 EOF
 }
 
+# Known sensitive cache paths, removed by SALT_SCRUB_CACHE=true after the
+# run and by the standalone `scrub` command:
+# - job data: jobs/queues (master), minion_jobs/job_queue/req/
+#   state_pause, proc files of crashed runs, bare-jid dirs of parallel
+#   runs (minion; jids are exactly 20 digits — leave other numeric
+#   dirs alone)
+# - compiled state data with pillar rendered in: highstate.cache.p,
+#   sls.p, accumulator (both caches)
+# - cached grains/minion data: grains.cache.p (both), minions (master —
+#   minion_data_cache; also receives e.g. saltext-vault data written for
+#   salt-ssh targets)
+# - credentials: vault (both — saltext-vault tokens), token (master)
+scrub_cache() {
+	rm -rf \
+		"${SALT_PUSH_DIR}"/cache/master/{jobs,queues,minions,token} \
+		"${SALT_PUSH_DIR}"/cache/minion/{minion_jobs,job_queue,req,proc,state_pause} \
+		"${SALT_PUSH_DIR}"/cache/{minion,master}/{highstate.cache.p,sls.p,accumulator,grains.cache.p,vault}
+	[[ -d "${SALT_PUSH_DIR}/cache/minion" ]] &&
+		find "${SALT_PUSH_DIR}/cache/minion" -maxdepth 1 -type d -regextype posix-extended \
+			-regex '.*/[0-9]{20}' -exec rm -rf {} +
+	return 0
+}
+
 case "${1:-}" in
 salt | salt-call | salt-ssh)
 	mode="${1}"
 	shift
+	;;
+scrub)
+	# Standalone scrub, e.g. once after a multi-command sequence where
+	# each command ran with SALT_SCRUB_CACHE=defer (the action does this)
+	SALT_PUSH_DIR="${SALT_PUSH_DIR:-/app}"
+	scrub_cache
+	exit 0
 	;;
 help | -h | --help)
 	print_help
@@ -73,6 +106,9 @@ user_pillar="${SALT_PILLAR:-}"
 user_minion_config="${SALT_MINION_CONFIG:-}"
 user_ssh_config="${SALT_SSH_CONFIG:-}"
 user_result_file="${SALT_RESULT_FILE:-}"
+user_scrub="${SALT_SCRUB_CACHE:-}"
+user_scrub="${user_scrub,,}"
+[[ ${user_scrub} == true || ${user_scrub} == defer ]] || user_scrub=""
 
 # Upstream helpers: logging, map_uidgid and
 # install_python_additional_packages. Not nounset-safe, so no set -u here.
@@ -164,6 +200,11 @@ fi
 # appended; salt-ssh writes returns through master_job_cache, redirected
 # to the same returner (which also keeps job returns out of the msgpack
 # cache under cache/master/jobs).
+# SALT_SCRUB_CACHE: defense in depth, not a cure — salt-ssh job returns
+# are discarded by the returner (unless SALT_RESULT_FILE captures them),
+# the remote thin dir is wiped after each session (ssh_wipe: its
+# salt_state.tgz contains rendered pillar), and job-return leftovers are
+# removed from the cache after the run (see the run section below).
 result_minion_extra=""
 result_master_extra=""
 result_args=()
@@ -176,7 +217,13 @@ push_result.file: ${user_result_file}
 push_result.accumulate: True
 master_job_cache: push_result"
 	result_args=(--return push_result)
+elif [[ -n ${user_scrub} ]]; then
+	result_master_extra="
+push_result.drop: True
+master_job_cache: push_result"
 fi
+[[ -n ${user_scrub} ]] && result_master_extra+="
+ssh_wipe: True"
 
 cat >"${SALT_ROOT_DIR}/minion" <<EOF
 id: ${SALT_MINION_ID}
@@ -303,6 +350,15 @@ if [[ -n ${SALT_PUSH_USER} && ${SALT_PUSH_USER} != root ]]; then
 	chown -R "${SALT_PUSH_USER}:" "${SALT_PUSH_DIR}/ssh" 2>/dev/null ||
 		log_info "${SALT_PUSH_DIR}/ssh not writable, assuming user-managed contents"
 	chown -R "${SALT_PUSH_USER}:" "${SALT_ROOT_DIR}"
-	exec sudo -HEu "${SALT_PUSH_USER}" "$@"
+	set -- sudo -HEu "${SALT_PUSH_USER}" "$@"
 fi
-exec "$@"
+[[ ${user_scrub} == true ]] || exec "$@"
+
+# SALT_SCRUB_CACHE=true: run the tool as a child so the known sensitive
+# cache paths (see scrub_cache above) can be removed afterwards,
+# regardless of what wrote them. `defer` skips this — a later `scrub`
+# invocation cleans up once, e.g. after a multi-command sequence.
+rc=0
+"$@" || rc=$?
+scrub_cache
+exit "${rc}"

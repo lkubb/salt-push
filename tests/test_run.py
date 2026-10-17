@@ -156,6 +156,12 @@ class BuildDockerArgsTest(unittest.TestCase):
         args = self.build(SP_RESULTS_FILTER=".return")
         self.assertIn("SALT_RESULT_FILE=/app/cache/.salt-push-result.json", args)
 
+    def test_scrub_cache_opt_in(self):
+        # Commands run with defer; the one-shot scrub happens via the
+        # entrypoint's `scrub` verb after the last command.
+        self.assertIn("SALT_SCRUB_CACHE=defer", self.build(SP_SCRUB_CACHE="true"))
+        self.assertNotIn("SALT_SCRUB_CACHE=defer", self.build())
+
     def test_passthrough_and_env_pass(self):
         args = self.build(
             SP_FORCE_COLOR="true",

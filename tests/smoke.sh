@@ -279,6 +279,52 @@ else
 	fail "salt-ssh: SALT_RESULT_FILE captures per-target returns, no job cache"$'\n'"$(cat "${res_dir}/result.json" 2>/dev/null)"
 fi
 
+# 16d1. SALT_SCRUB_CACHE alone: salt-ssh job returns dropped, not cached
+docker run --rm -v "${res_dir}:/app/cache" -e SALT_SCRUB_CACHE=true \
+	-e SALT_ROSTER=$'web1:\n  host: 127.0.0.1\n  port: 2' \
+	"${IMG}" salt-ssh web1 test.ping >/dev/null 2>&1 || true
+if [[ -z "$(find "${res_dir}/master/jobs" -name jid 2>/dev/null)" ]]; then
+	pass "salt-ssh: SALT_SCRUB_CACHE drops job returns"
+else
+	fail "salt-ssh: SALT_SCRUB_CACHE drops job returns"$'\n'"$(find "${res_dir}/master/jobs" 2>/dev/null)"
+fi
+
+# 16d2. SALT_SCRUB_CACHE + SALT_RESULT_FILE: capture still works, exit code
+# preserved on failing states, known sensitive paths scrubbed (pre-seeded
+# here, as if left behind by earlier runs against a persistent cache)
+mkdir -p "${res_dir}/master/token" "${res_dir}/minion/vault" \
+	"${res_dir}/minion/20260101000000000000" "${res_dir}/minion/12345"
+touch "${res_dir}/master/token/smoke" "${res_dir}/minion/vault/session" \
+	"${res_dir}/minion/grains.cache.p"
+rc=0
+docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" \
+	-e SALT_SCRUB_CACHE=true -e SALT_RESULT_FILE=/app/cache/result.json \
+	"${IMG}" salt-call state.apply fail >/dev/null 2>&1 || rc=$?
+leftovers="$(find "${res_dir}" \( -name token -o -name vault -o -name grains.cache.p \
+	-o -name highstate.cache.p -o -name sls.p -o -name '2026*' \) 2>/dev/null)"
+if [[ ${rc} -eq 2 ]] && grep -q '"retcode": 2' "${res_dir}/result.json" 2>/dev/null &&
+	[[ -z ${leftovers} && -d "${res_dir}/minion/12345" ]]; then
+	pass "salt-call: SALT_SCRUB_CACHE scrubs sensitive paths, spares non-jid numeric dirs (rc=${rc})"
+else
+	fail "salt-call: SALT_SCRUB_CACHE scrubs sensitive paths, spares non-jid numeric dirs (rc=${rc})"$'\n'"${leftovers}"$'\n'"$(ls -A "${res_dir}/minion" 2>/dev/null)"
+fi
+
+# 16d3. SALT_SCRUB_CACHE=defer keeps warm caches between commands; the
+# standalone scrub verb cleans up once at the end (multi-command flow)
+docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" \
+	-e SALT_SCRUB_CACHE=defer "${IMG}" salt-call state.apply ok >/dev/null 2>&1 || true
+if [[ -e "${res_dir}/minion/highstate.cache.p" ]]; then
+	pass "salt-call: SALT_SCRUB_CACHE=defer keeps warm caches"
+else
+	fail "salt-call: SALT_SCRUB_CACHE=defer keeps warm caches"$'\n'"$(ls -A "${res_dir}/minion" 2>/dev/null)"
+fi
+docker run --rm -v "${res_dir}:/app/cache" "${IMG}" scrub >/dev/null 2>&1 || true
+if [[ ! -e "${res_dir}/minion/highstate.cache.p" && ! -e "${res_dir}/minion/sls.p" ]]; then
+	pass "scrub: standalone verb removes deferred leftovers"
+else
+	fail "scrub: standalone verb removes deferred leftovers"$'\n'"$(ls -A "${res_dir}/minion" 2>/dev/null)"
+fi
+
 # 16d. salt mode: dispatch honors the returner (patched Salt)
 docker run --rm -v "${res_dir}:/app/cache" -e SALT_RESULT_FILE=/app/cache/result.json \
 	"${IMG}" salt -L salt-push test.ping >/dev/null 2>&1 || true

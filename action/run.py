@@ -123,6 +123,12 @@ def build_docker_args(env, workspace, uid, gid):
     # A results-filter alone implies results collection (cache-paths style)
     if env.get("SP_RESULTS") == "true" or env.get("SP_RESULTS_FILTER"):
         args.extend(["-e", f"SALT_RESULT_FILE=/app/cache/{RESULT_FILE}"])
+    if env.get("SP_SCRUB_CACHE") == "true":
+        # defer: write-avoidance config per command (returner drop,
+        # ssh_wipe), but the cache removal runs once after the last
+        # command — main() invokes the entrypoint's `scrub` verb, which
+        # also covers fail-fast exits before the final command.
+        args.extend(["-e", "SALT_SCRUB_CACHE=defer"])
     for var in PASSTHROUGH_VARS:
         if env.get(var):
             args.extend(["-e", var])
@@ -421,6 +427,21 @@ def main(env=os.environ):
                     flush=True,
                 )
                 break
+
+    if env.get("SP_SCRUB_CACHE") == "true":
+        # One scrub for the whole sequence (the commands ran with
+        # SALT_SCRUB_CACHE=defer), before the cache save step.
+        proc = subprocess.run(
+            ["docker", *docker_args, env["SP_IMAGE"], "scrub"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            print(
+                f"::warning::salt-push: cache scrub failed: {proc.stderr.strip()}",
+                flush=True,
+            )
 
     with open(env["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
         out.write(f"exit-code={rc}\nfailed-command={failed}\n")

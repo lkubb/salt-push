@@ -48,7 +48,7 @@ index 4d34cd5396..722d5db7a3 100644
 +            ):
 +                job_ret = job_ret or _get_job_ret(ret)
 +                # Local job cache has been enabled
-+                salt.utils.minion.cache_jobs(self.opts, job_ret["jid"], _get_job_ret(ret))
++                salt.utils.minion.cache_jobs(self.opts, job_ret["jid"], job_ret)
 +            return ret
 +
          ret = {}
