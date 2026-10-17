@@ -154,7 +154,7 @@ jobs:
           image: salt-push:ci
           pull: never
           states: tests/fixtures/srv/salt
-          pillar: tests/fixtures/srv/pillar
+          pillars: tests/fixtures/srv/pillar
           logs-dir: ${{ runner.temp }}/salt-logs
           log-file-level: debug
 
@@ -167,7 +167,7 @@ jobs:
         with:
           image: salt-push:ci
           pull: never
-          salt-resources: 'dummy: {resource_ids: [env-01]}'
+          resources: 'dummy: {resource_ids: [env-01]}'
           summary: 'true'
           commands: |
             # comment and blank lines are skipped
@@ -183,7 +183,7 @@ jobs:
           image: salt-push:ci
           pull: never
           states: tests/fixtures/srv/salt
-          pillar: tests/fixtures/srv/pillar
+          pillars: tests/fixtures/srv/pillar
           commands: |
             salt-call state.apply fail
             salt-call test.ping

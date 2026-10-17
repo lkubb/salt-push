@@ -68,6 +68,9 @@ user_log_level="${SALT_LOG_LEVEL:-}"
 user_level_logfile="${SALT_LOGFILE_LEVEL:-}"
 user_resources="${SALT_RESOURCES:-}"
 user_roster="${SALT_ROSTER:-}"
+user_pillar="${SALT_PILLAR:-}"
+user_minion_config="${SALT_MINION_CONFIG:-}"
+user_ssh_config="${SALT_SSH_CONFIG:-}"
 
 # Upstream helpers: logging, map_uidgid and
 # install_python_additional_packages. Not nounset-safe, so no set -u here.
@@ -99,18 +102,42 @@ mkdir -p "${SALT_PUSH_DIR}/cache/minion" "${SALT_PUSH_DIR}/cache/master" \
 	log_warn "Cannot create ${SALT_PUSH_DIR}/ssh/known_hosts (read-only mount?)"
 [[ -d "${SALT_PUSH_DIR}/srv/salt" ]] || log_warn "No state tree mounted at ${SALT_PUSH_DIR}/srv/salt"
 
-# SALT_RESOURCES: YAML mapping placed under the `resources:` pillar key.
-# Served via ext_pillar instead of a generated pillar root: a second top.sls
-# in the same env silently loses against a user-mounted one.
+# SALT_PILLAR (YAML mapping) / SALT_RESOURCES (YAML mapping placed under the
+# `resources:` pillar key): inline pillar. Served via ext_pillar instead of a
+# generated pillar root: a second top.sls in the same env silently loses
+# against a user-mounted one. SALT_RESOURCES is merged after SALT_PILLAR, so
+# the dedicated variable wins for the `resources:` key.
 ext_pillar_extra=""
+if [[ -n ${user_pillar} ]]; then
+	printf '%s\n' "${user_pillar}" >"${SALT_ROOT_DIR}/push_pillar.yaml"
+	ext_pillar_extra+="
+  - cmd_yaml: cat ${SALT_ROOT_DIR}/push_pillar.yaml"
+fi
 if [[ -n ${user_resources} ]]; then
 	{
 		echo "resources:"
 		echo "  ${user_resources//$'\n'/$'\n'  }"
 	} >"${SALT_ROOT_DIR}/push_resources.yaml"
-	ext_pillar_extra="
-ext_pillar:
+	ext_pillar_extra+="
   - cmd_yaml: cat ${SALT_ROOT_DIR}/push_resources.yaml"
+fi
+[[ -n ${ext_pillar_extra} ]] && ext_pillar_extra="
+ext_pillar:${ext_pillar_extra}"
+
+# SALT_MINION_CONFIG / SALT_SSH_CONFIG: inline minion/master config, merged
+# via `include` — Salt processes it after default_include, so it wins over
+# mounted drop-ins.
+minion_include_extra=""
+if [[ -n ${user_minion_config} ]]; then
+	printf '%s\n' "${user_minion_config}" >"${SALT_ROOT_DIR}/push_minion.conf"
+	minion_include_extra="
+include: ${SALT_ROOT_DIR}/push_minion.conf"
+fi
+ssh_include_extra=""
+if [[ -n ${user_ssh_config} ]]; then
+	printf '%s\n' "${user_ssh_config}" >"${SALT_ROOT_DIR}/push_ssh.conf"
+	ssh_include_extra="
+include: ${SALT_ROOT_DIR}/push_ssh.conf"
 fi
 
 # SALT_ROSTER: roster contents, written to a generated file that takes
@@ -143,7 +170,7 @@ enable_fqdns_grains: False
 # Custom modules shipped with this image (e.g. resource.list)
 module_dirs:
   - /opt/salt-push
-default_include: ${SALT_PUSH_DIR}/config/minion.d/*.conf
+default_include: ${SALT_PUSH_DIR}/config/minion.d/*.conf${minion_include_extra}
 EOF
 
 # salt-ssh reads the master config
@@ -164,7 +191,7 @@ known_hosts_file: ${SALT_PUSH_DIR}/ssh/known_hosts
 log_file: ${SALT_PUSH_DIR}/logs/ssh
 ssh_log_file: ${SALT_PUSH_DIR}/logs/ssh
 log_level_logfile: ${SALT_LOGFILE_LEVEL}
-default_include: ${SALT_PUSH_DIR}/config/ssh.d/*.conf
+default_include: ${SALT_PUSH_DIR}/config/ssh.d/*.conf${ssh_include_extra}
 EOF
 
 install_python_additional_packages

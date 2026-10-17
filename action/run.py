@@ -22,8 +22,11 @@ ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
 # Container env passed through verbatim when set. Bare -e NAME: docker reads
 # the value from its own environment, it never appears in the argument list.
 PASSTHROUGH_VARS = (
+    "SALT_PILLAR",
     "SALT_RESOURCES",
     "SALT_ROSTER",
+    "SALT_MINION_CONFIG",
+    "SALT_SSH_CONFIG",
     "SALT_LOG_LEVEL",
     "SALT_LOGFILE_LEVEL",
     "SALT_PUSH_USER",
@@ -132,11 +135,11 @@ def build_docker_args(env, workspace, uid, gid):
         mount_ro(value, dest)
 
     mount_tree(env.get("SP_STATES", ""), "/app/srv/salt", "srv/salt", "states")
-    mount_tree(env.get("SP_PILLAR", ""), "/app/srv/pillar", "srv/pillar", "pillar")
+    mount_tree(env.get("SP_PILLARS", ""), "/app/srv/pillar", "srv/pillar", "pillars")
     for var, dest in (
-        ("SP_ROSTER", "/app/roster"),
-        ("SP_MINION_CONFIG", "/app/config/minion.d"),
-        ("SP_SSH_CONFIG", "/app/config/ssh.d"),
+        ("SP_ROSTER_FILE", "/app/roster"),
+        ("SP_MINION_CONFIG_DIR", "/app/config/minion.d"),
+        ("SP_SSH_CONFIG_DIR", "/app/config/ssh.d"),
     ):
         if env.get(var):
             mount_ro(env[var], dest)

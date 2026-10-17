@@ -92,7 +92,7 @@ class BuildDockerArgsTest(unittest.TestCase):
 
     def test_absent_default_trees_skipped_with_notice(self):
         args, notices = run.build_docker_args(
-            {**self.env, "SP_STATES": "srv/salt", "SP_PILLAR": "srv/pillar"},
+            {**self.env, "SP_STATES": "srv/salt", "SP_PILLARS": "srv/pillar"},
             self.workspace.name,
             1001,
             118,
@@ -102,19 +102,19 @@ class BuildDockerArgsTest(unittest.TestCase):
             notices,
             [
                 "states: default 'srv/salt' not present — skipped",
-                "pillar: default 'srv/pillar' not present — skipped",
+                "pillars: default 'srv/pillar' not present — skipped",
             ],
         )
 
     def test_present_default_trees_mounted(self):
         os.makedirs(os.path.join(self.workspace.name, "srv/salt"))
-        args = self.build(SP_STATES="srv/salt", SP_PILLAR="srv/pillar")
+        args = self.build(SP_STATES="srv/salt", SP_PILLARS="srv/pillar")
         self.assertIn(
             f"{self.workspace.name}/srv/salt:/app/srv/salt:ro", self.mounts(args)
         )
         self.assertEqual(
-            self.notices(SP_STATES="srv/salt", SP_PILLAR="srv/pillar"),
-            ["pillar: default 'srv/pillar' not present — skipped"],
+            self.notices(SP_STATES="srv/salt", SP_PILLARS="srv/pillar"),
+            ["pillars: default 'srv/pillar' not present — skipped"],
         )
 
     def test_explicit_missing_tree_is_config_error(self):
@@ -123,12 +123,12 @@ class BuildDockerArgsTest(unittest.TestCase):
 
     def test_relative_and_absolute_paths(self):
         os.makedirs(os.path.join(self.workspace.name, "fixtures/pillar"))
-        args = self.build(SP_PILLAR="fixtures/pillar")
+        args = self.build(SP_PILLARS="fixtures/pillar")
         self.assertIn(
             f"{self.workspace.name}/fixtures/pillar:/app/srv/pillar:ro",
             self.mounts(args),
         )
-        args = self.build(SP_PILLAR=os.path.join(self.workspace.name, "fixtures/pillar"))
+        args = self.build(SP_PILLARS=os.path.join(self.workspace.name, "fixtures/pillar"))
         self.assertIn(
             f"{self.workspace.name}/fixtures/pillar:/app/srv/pillar:ro",
             self.mounts(args),
@@ -151,12 +151,18 @@ class BuildDockerArgsTest(unittest.TestCase):
             SALT_LOG_LEVEL="debug",
             SALT_LOGFILE_LEVEL="info",
             SALT_RESOURCES="",
+            SALT_PILLAR="smoke: env",
+            SALT_MINION_CONFIG="hash_type: sha512",
+            SALT_SSH_CONFIG="ssh_timeout: 30",
             SP_ENV_PASS="GH_TOKEN,OTHER",
         )
         env_flags = [args[i + 1] for i, arg in enumerate(args) if arg == "-e"]
         self.assertIn("SALT_FORCE_COLOR=true", env_flags)
         self.assertIn("SALT_LOG_LEVEL", env_flags)
         self.assertIn("SALT_LOGFILE_LEVEL", env_flags)
+        self.assertIn("SALT_PILLAR", env_flags)
+        self.assertIn("SALT_MINION_CONFIG", env_flags)
+        self.assertIn("SALT_SSH_CONFIG", env_flags)
         self.assertNotIn("SALT_RESOURCES", env_flags)  # empty — not forwarded
         self.assertIn("GH_TOKEN", env_flags)
         self.assertIn("OTHER", env_flags)

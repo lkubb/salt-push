@@ -142,6 +142,24 @@ check "salt: SALT_RESOURCES overrides same-type pillar list" 'env-01:' \
 	-e SALT_RESOURCES='dummy: {resource_ids: [env-01]}' \
 	"${IMG}" salt '*' test.ping
 
+# 12h. SALT_PILLAR provides pillar without any mount (unmask: this Salt
+# masks pillar output by default — pillar_mask_output)
+check "salt-call: SALT_PILLAR env pillar" 'pillar-env-works' \
+	docker run --rm -e SALT_PILLAR='smoke_env: pillar-env-works' \
+	"${IMG}" salt-call pillar.get smoke_env unmask=True
+
+# 12i. SALT_PILLAR merges over mounted pillar; SALT_RESOURCES still wins
+# for the resources: key (merged after SALT_PILLAR)
+out="$(docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" \
+	-e SALT_PILLAR=$'common:\n  greeting: env-wins\nresources:\n  dummy: {resource_ids: [pillar-01]}' \
+	-e SALT_RESOURCES='dummy: {resource_ids: [res-01]}' \
+	"${IMG}" salt-call pillar.items unmask=True 2>&1)" || true
+if grep -q 'env-wins' <<<"${out}" && grep -q 'res-01' <<<"${out}" && ! grep -q 'pillar-01' <<<"${out}"; then
+	pass "salt-call: SALT_PILLAR overrides mounted pillar, SALT_RESOURCES wins resources key"
+else
+	fail "salt-call: SALT_PILLAR overrides mounted pillar, SALT_RESOURCES wins resources key"$'\n'"${out}"
+fi
+
 # 13. Failing state under -r dispatch still exits non-zero
 rc=0
 docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" "${IMG}" salt '*' state.apply fail >/dev/null 2>&1 || rc=$?
@@ -174,6 +192,21 @@ else
 fi
 rm -rf "${ssh_dir}"
 
+# 14d. SALT_SSH_CONFIG sets master config inline — it wins over the generated
+# config (the key is auto-generated at the overridden ssh_priv path)
+ssh_dir="${HERE}/.smoke-ssh-inline"
+rm -rf "${ssh_dir}" && mkdir -p "${ssh_dir}"
+docker run --rm -v "${ssh_dir}:/app/ssh" \
+	-e SALT_SSH_CONFIG='ssh_priv: /app/ssh/inline-key.rsa' \
+	-e SALT_ROSTER=$'web1:\n  host: 127.0.0.1\n  port: 2' \
+	"${IMG}" salt-ssh web1 test.ping >/dev/null 2>&1 || true
+if [[ -f "${ssh_dir}/inline-key.rsa" ]]; then
+	pass "salt-ssh: SALT_SSH_CONFIG overrides generated config"
+else
+	fail "salt-ssh: SALT_SSH_CONFIG overrides generated config"$'\n'"$(ls -la "${ssh_dir}")"
+fi
+rm -rf "${ssh_dir}"
+
 # 15. Hardened config defaults: no fqdns grain stalls — and drop-ins still
 # override them
 check "config: fqdns grains disabled" 'False' \
@@ -183,6 +216,18 @@ check "config: drop-in overrides hardened default" 'True' \
 	docker run --rm \
 	-v "${FIXTURES}/minion_config:/app/config/minion.d:ro" \
 	"${IMG}" salt-call config.get enable_fqdns_grains
+
+# 15b. SALT_MINION_CONFIG sets minion config inline, no mount needed
+check "config: SALT_MINION_CONFIG overrides hardened default" 'True' \
+	docker run --rm -e SALT_MINION_CONFIG='enable_fqdns_grains: True' \
+	"${IMG}" salt-call config.get enable_fqdns_grains
+
+# 15c. Inline config is included after default_include — it wins over drop-ins
+check "config: SALT_MINION_CONFIG wins over drop-in" 'inline-wins' \
+	docker run --rm \
+	-v "${FIXTURES}/minion_config:/app/config/minion.d:ro" \
+	-e SALT_MINION_CONFIG=$'grains:\n  smoke_dropin: inline-wins' \
+	"${IMG}" salt-call grains.get smoke_dropin
 
 # 16. Build-arg-baked package is importable by the onedir interpreter
 if [[ -n ${BAKED} ]]; then

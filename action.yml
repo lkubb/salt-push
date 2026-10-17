@@ -26,36 +26,74 @@ inputs:
       when absent) or never (a local image must exist, e.g. one built in a
       previous step).
     default: always
+
+  # Runtime dirs/files
+  # 1A State tree/Pillar tree
   states:
     description: >-
       State tree, mounted read-only to /app/srv/salt. Relative paths resolve
       against the workspace. The default is skipped if absent; an explicitly
-      set path must exist. Empty disables the mount.
+      set path must exist. Empty disables the mount entirely.
     default: srv/salt
-  pillar:
+  pillars:
     description: >-
       Pillar tree, mounted read-only to /app/srv/pillar. Relative paths
       resolve against the workspace. The default is skipped if absent; an
-      explicitly set path must exist. Empty disables the mount.
+      explicitly set path must exist. Empty disables the mount entirely.
     default: srv/pillar
-  roster:
+
+  # 1B Literal inputs for minion pillar
+  minion-pillar:
+    description: >-
+      Inline pillar data (YAML mapping) for the local minion, merged over
+      the mounted pillar tree; sets SALT_PILLAR.
+    default: ''
+  resources:
+    description: >-
+      Inline resource declarations (YAML placed under the resources: pillar
+      key); sets SALT_RESOURCES.
+    default: ''
+
+  # 2A Minion config dir + literal input
+  minion-config-dir:
+    description: >-
+      Directory with minion config drop-ins (*.conf), mounted read-only to
+      /app/config/minion.d.
+    default: ''
+  minion-config:
+    description: >-
+      Inline minion config (YAML), merged over the generated config and any
+      minion-config-dir drop-ins; sets SALT_MINION_CONFIG.
+    default: ''
+
+  # 2B.1 salt-ssh (master) config dir + literal input
+  ssh-config-dir:
+    description: >-
+      Directory with salt-ssh master config drop-ins (*.conf), mounted
+      read-only to /app/config/ssh.d.
+    default: ''
+  ssh-config:
+    description: >-
+      Inline salt-ssh master config (YAML), merged over the generated config
+      and any ssh-config-dir drop-ins; sets SALT_SSH_CONFIG.
+    default: ''
+  # 2B.2 salt-ssh roster file + literal input
+  roster-file:
     description: salt-ssh roster file, mounted read-only to /app/roster.
     default: ''
+  roster:
+    description: Inline salt-ssh roster contents; sets SALT_ROSTER.
+    default: ''
+
+  # 3 Runtime dirs + their handling
+  # 3A Salt-ssh keys + known_hosts
   ssh-dir:
     description: >-
       Directory mounted writable to /app/ssh (salt-ssh client key +
       known_hosts; contains a private key). Created if missing.
     default: ''
-  minion-config:
-    description: >-
-      Directory with minion config drop-ins (*.conf), mounted read-only to
-      /app/config/minion.d.
-    default: ''
-  ssh-config:
-    description: >-
-      Directory with salt-ssh master config drop-ins (*.conf), mounted
-      read-only to /app/config/ssh.d.
-    default: ''
+
+  # 3B Cache dir + cache config
   cache-dir:
     description: >-
       Host directory mounted writable to /app/cache. Always mounted, created
@@ -82,19 +120,13 @@ inputs:
       Prefix fallback(s) used to restore the cache. Set to the empty string
       to only restore exact cache-key matches (never stale entries).
     default: salt-push-
+
+  # 4 Runtime config
   env-pass:
     description: >-
       Whitespace/comma-separated names of environment variables to forward
       into the container (set them on this step's env:). Only the names
       appear on the docker command line, never the values.
-    default: ''
-  salt-resources:
-    description: >-
-      Inline resource declarations (YAML placed under the resources: pillar
-      key); sets SALT_RESOURCES.
-    default: ''
-  salt-roster:
-    description: Inline salt-ssh roster contents; sets SALT_ROSTER.
     default: ''
   log-level:
     description: Console log level; sets SALT_LOG_LEVEL (container default warning).
@@ -171,18 +203,21 @@ runs:
         SP_PULL: ${{ inputs.pull }}
         SP_COMMANDS: ${{ inputs.commands }}
         SP_STATES: ${{ inputs.states }}
-        SP_PILLAR: ${{ inputs.pillar }}
-        SP_ROSTER: ${{ inputs.roster }}
+        SP_PILLARS: ${{ inputs.pillars }}
+        SP_ROSTER_FILE: ${{ inputs.roster-file }}
         SP_SSH_DIR: ${{ inputs.ssh-dir }}
         SP_LOGS_DIR: ${{ inputs.logs-dir }}
-        SP_MINION_CONFIG: ${{ inputs.minion-config }}
-        SP_SSH_CONFIG: ${{ inputs.ssh-config }}
+        SP_MINION_CONFIG_DIR: ${{ inputs.minion-config-dir }}
+        SP_SSH_CONFIG_DIR: ${{ inputs.ssh-config-dir }}
         SP_CACHE_DIR: ${{ steps.setup.outputs.cache-dir }}
         SP_ENV_PASS: ${{ inputs.env-pass }}
         SP_FORCE_COLOR: ${{ inputs.force-color }}
         SP_SUMMARY: ${{ inputs.summary }}
-        SALT_RESOURCES: ${{ inputs.salt-resources }}
-        SALT_ROSTER: ${{ inputs.salt-roster }}
+        SALT_PILLAR: ${{ inputs.minion-pillar }}
+        SALT_RESOURCES: ${{ inputs.resources }}
+        SALT_ROSTER: ${{ inputs.roster }}
+        SALT_MINION_CONFIG: ${{ inputs.minion-config }}
+        SALT_SSH_CONFIG: ${{ inputs.ssh-config }}
         SALT_LOG_LEVEL: ${{ inputs.log-level }}
         SALT_LOGFILE_LEVEL: ${{ inputs.log-file-level }}
         SALT_PUSH_USER: ${{ inputs.user }}
