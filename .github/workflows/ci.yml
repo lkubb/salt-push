@@ -154,7 +154,7 @@ jobs:
           cache-from: type=gha,scope=build-amd64
 
       - name: Default highstate
-        uses: ./
+        uses: $/
         with:
           image: salt-push:ci
           pull: never
@@ -168,7 +168,7 @@ jobs:
 
       # No trees at all: the absent default mounts are skipped silently
       - name: Multiple commands + inline resources
-        uses: ./
+        uses: $/
         with:
           image: salt-push:ci
           pull: never
@@ -183,7 +183,7 @@ jobs:
       - name: Failing command
         id: failing
         continue-on-error: true
-        uses: ./
+        uses: $/
         with:
           image: salt-push:ci
           pull: never
@@ -206,7 +206,7 @@ jobs:
       # cache/save runs at action end (not as a job post-step), so the
       # round-trip is testable within a single job.
       - name: Cache round-trip (save, whitelisted)
-        uses: ./
+        uses: $/
         with:
           image: salt-push:ci
           pull: never
@@ -219,7 +219,7 @@ jobs:
         run: rm -rf "${RUNNER_TEMP}/salt-push-cache"
 
       - name: Cache round-trip (restore)
-        uses: ./
+        uses: $/
         with:
           image: salt-push:ci
           pull: never

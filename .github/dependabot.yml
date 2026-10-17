@@ -5,6 +5,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
       - docker
@@ -13,10 +15,32 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns:
           - "*"
+        update-types:
+          - minor
+          - patch
     labels:
       - dependencies
       - github-actions
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      hooks:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - pre-commit

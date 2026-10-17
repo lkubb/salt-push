@@ -50,8 +50,18 @@ repos:
     hooks:
       - id: hadolint
 
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: c92afdf2c6ca336aaa8f39e2bd8d48f62dbd8e1f  # v1.31.1
+    hooks:
+      - id: zizmor
+        name: Lint actions and workflows
+        args: [--no-progress, --fix]
+
   - repo: https://github.com/kjanat/actionlint
     rev: 08bb2c4f0d039744455b87aef1c647fb8b66d37b  # v1.17.0
     hooks:
       - id: actionlint-shellcheck
         alias: actionlint
+        args:
+          - -ignore
+          - 'specifying action "\$/" in invalid format.*'  # will be fixed in the next release
