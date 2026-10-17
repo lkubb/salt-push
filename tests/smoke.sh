@@ -14,6 +14,11 @@ BAKED="${2:-}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES="${HERE}/fixtures"
 
+# For writable mounts: map the container user onto the invoking one (like the
+# action does), otherwise host-side cleanup cannot remove container-written
+# files once the salt UID (1000) differs from ours (1001 on GitHub runners).
+as_me=(-e "PUID=$(id -u)" -e "PGID=$(id -g)")
+
 failures=0
 fail() {
 	echo "FAIL: $*" >&2
@@ -197,7 +202,7 @@ check "salt-ssh: SALT_ROSTER env roster" '^web1:' \
 # 14c. Client key + known_hosts persist in a mounted /app/ssh
 ssh_dir="${HERE}/.smoke-ssh"
 rm -rf "${ssh_dir}" && mkdir -p "${ssh_dir}"
-docker run --rm -v "${ssh_dir}:/app/ssh" \
+docker run --rm -v "${ssh_dir}:/app/ssh" "${as_me[@]}" \
 	-e SALT_ROSTER=$'web1:\n  host: 127.0.0.1\n  port: 2' \
 	"${IMG}" salt-ssh web1 test.ping >/dev/null 2>&1 || true
 if [[ -f "${ssh_dir}/salt-ssh.rsa" && -f "${ssh_dir}/known_hosts" ]]; then
@@ -211,7 +216,7 @@ rm -rf "${ssh_dir}"
 # config (the key is auto-generated at the overridden ssh_priv path)
 ssh_dir="${HERE}/.smoke-ssh-inline"
 rm -rf "${ssh_dir}" && mkdir -p "${ssh_dir}"
-docker run --rm -v "${ssh_dir}:/app/ssh" \
+docker run --rm -v "${ssh_dir}:/app/ssh" "${as_me[@]}" \
 	-e SALT_SSH_CONFIG='ssh_priv: /app/ssh/inline-key.rsa' \
 	-e SALT_ROSTER=$'web1:\n  host: 127.0.0.1\n  port: 2' \
 	"${IMG}" salt-ssh web1 test.ping >/dev/null 2>&1 || true
@@ -247,7 +252,8 @@ check "config: SALT_MINION_CONFIG wins over drop-in" 'inline-wins' \
 # 16. SALT_RESULT_FILE: JSON job return written, no msgpack job cache
 res_dir="${HERE}/.smoke-results"
 rm -rf "${res_dir}" && mkdir -p "${res_dir}"
-docker run --rm -v "${res_dir}:/app/cache" -e SALT_RESULT_FILE=/app/cache/result.json \
+docker run --rm -v "${res_dir}:/app/cache" "${as_me[@]}" \
+	-e SALT_RESULT_FILE=/app/cache/result.json \
 	"${IMG}" salt-call test.ping >/dev/null 2>&1 || true
 if grep -q '"return": true' "${res_dir}/result.json" 2>/dev/null &&
 	[[ -z "$(ls -A "${res_dir}/minion/minion_jobs" 2>/dev/null)" ]]; then
@@ -258,7 +264,7 @@ fi
 
 # 16b. Failing state: exit code preserved, cached retcode in the result
 rc=0
-docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" \
+docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" "${as_me[@]}" \
 	-e SALT_RESULT_FILE=/app/cache/result.json \
 	"${IMG}" salt-call state.apply fail >/dev/null 2>&1 || rc=$?
 if [[ ${rc} -eq 2 ]] && grep -q '"retcode": 2' "${res_dir}/result.json" 2>/dev/null; then
@@ -269,7 +275,8 @@ fi
 
 # 16c. salt-ssh: per-target returns via redirected master_job_cache —
 # nothing lands in the msgpack job cache
-docker run --rm -v "${res_dir}:/app/cache" -e SALT_RESULT_FILE=/app/cache/result.json \
+docker run --rm -v "${res_dir}:/app/cache" "${as_me[@]}" \
+	-e SALT_RESULT_FILE=/app/cache/result.json \
 	-e SALT_ROSTER=$'web1:\n  host: 127.0.0.1\n  port: 2' \
 	"${IMG}" salt-ssh web1 test.ping >/dev/null 2>&1 || true
 if grep -q '"web1"' "${res_dir}/result.json" 2>/dev/null &&
@@ -280,7 +287,7 @@ else
 fi
 
 # 16d1. SALT_SCRUB_CACHE alone: salt-ssh job returns dropped, not cached
-docker run --rm -v "${res_dir}:/app/cache" -e SALT_SCRUB_CACHE=true \
+docker run --rm -v "${res_dir}:/app/cache" "${as_me[@]}" -e SALT_SCRUB_CACHE=true \
 	-e SALT_ROSTER=$'web1:\n  host: 127.0.0.1\n  port: 2' \
 	"${IMG}" salt-ssh web1 test.ping >/dev/null 2>&1 || true
 if [[ -z "$(find "${res_dir}/master/jobs" -name jid 2>/dev/null)" ]]; then
@@ -297,7 +304,7 @@ mkdir -p "${res_dir}/master/token" "${res_dir}/minion/vault" \
 touch "${res_dir}/master/token/smoke" "${res_dir}/minion/vault/session" \
 	"${res_dir}/minion/grains.cache.p"
 rc=0
-docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" \
+docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" "${as_me[@]}" \
 	-e SALT_SCRUB_CACHE=true -e SALT_RESULT_FILE=/app/cache/result.json \
 	"${IMG}" salt-call state.apply fail >/dev/null 2>&1 || rc=$?
 leftovers="$(find "${res_dir}" \( -name token -o -name vault -o -name grains.cache.p \
@@ -311,14 +318,14 @@ fi
 
 # 16d3. SALT_SCRUB_CACHE=defer keeps warm caches between commands; the
 # standalone scrub verb cleans up once at the end (multi-command flow)
-docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" \
+docker run --rm -v "${FIXTURES}/srv:/app/srv:ro" -v "${res_dir}:/app/cache" "${as_me[@]}" \
 	-e SALT_SCRUB_CACHE=defer "${IMG}" salt-call state.apply ok >/dev/null 2>&1 || true
 if [[ -e "${res_dir}/minion/highstate.cache.p" ]]; then
 	pass "salt-call: SALT_SCRUB_CACHE=defer keeps warm caches"
 else
 	fail "salt-call: SALT_SCRUB_CACHE=defer keeps warm caches"$'\n'"$(ls -A "${res_dir}/minion" 2>/dev/null)"
 fi
-docker run --rm -v "${res_dir}:/app/cache" "${IMG}" scrub >/dev/null 2>&1 || true
+docker run --rm -v "${res_dir}:/app/cache" "${as_me[@]}" "${IMG}" scrub >/dev/null 2>&1 || true
 if [[ ! -e "${res_dir}/minion/highstate.cache.p" && ! -e "${res_dir}/minion/sls.p" ]]; then
 	pass "scrub: standalone verb removes deferred leftovers"
 else
@@ -326,7 +333,8 @@ else
 fi
 
 # 16d. salt mode: dispatch honors the returner (patched Salt)
-docker run --rm -v "${res_dir}:/app/cache" -e SALT_RESULT_FILE=/app/cache/result.json \
+docker run --rm -v "${res_dir}:/app/cache" "${as_me[@]}" \
+	-e SALT_RESULT_FILE=/app/cache/result.json \
 	"${IMG}" salt -L salt-push test.ping >/dev/null 2>&1 || true
 if grep -q '"fun": "test.ping"' "${res_dir}/result.json" 2>/dev/null &&
 	grep -q '"tgt": "salt-push"' "${res_dir}/result.json" 2>/dev/null &&
