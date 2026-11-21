@@ -1,4 +1,4 @@
-FROM ghcr.io/cdalvaro/docker-salt-master:3008.3@sha256:75e4bea95dea9c2bd5482d51b787bb6f225bec99a8bd75584f9fb3593243ca06
+FROM ghcr.io/cdalvaro/docker-salt-master:3008.5_1@sha256:44e004e01eba106c38e63f3aadad4e8ee837efc5b45214de96f1fa04e4faa18d
 
 # Space-separated pip specs baked into the Salt onedir at build time.
 # Same name/semantics as the runtime env var honored by the entrypoints;
